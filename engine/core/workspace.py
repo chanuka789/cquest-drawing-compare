@@ -107,6 +107,14 @@ def can_write_to(folder: str | Path) -> bool:
     return True
 
 
+def _nearest_existing(target: Path) -> Path | None:
+    """The closest ancestor of *target* that exists, or None if the drive is gone."""
+    for candidate in target.parents:
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def validate_output_folder(
     path: str | Path,
     old_folder: str | Path | None = None,
@@ -151,20 +159,24 @@ def validate_output_folder(
                 "nothing is overwritten."
             )
     else:
-        parent = target.parent
-        if parent.is_dir():
-            result.is_writable = can_write_to(parent)
-            if result.is_writable:
-                result.warnings.append("This folder does not exist yet and will be created.")
-            else:
-                result.errors.append(
-                    f"The folder {parent} is read-only, so a new folder cannot be "
-                    "created there. Choose a different location."
-                )
-        else:
+        # Walk up to the nearest folder that does exist. Creating several
+        # levels at once is normal -- the suggested path is
+        # `<parent>/Comparisons/Compare_RevC_to_RevD_<date>`, so refusing
+        # anything more than one level deep would reject our own suggestion.
+        ancestor = _nearest_existing(target)
+
+        if ancestor is None:
             result.errors.append(
                 "That location does not exist. Check the path, or the network "
                 "drive may be disconnected."
+            )
+        elif can_write_to(ancestor):
+            result.is_writable = True
+            result.warnings.append("This folder does not exist yet and will be created.")
+        else:
+            result.errors.append(
+                f"The folder {ancestor} is read-only, so a new folder cannot be "
+                "created there. Choose a different location."
             )
 
     try:

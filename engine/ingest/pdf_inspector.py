@@ -169,10 +169,12 @@ def _read_container_facts(path: str, info: PdfInfo) -> None:
             "copy, or remove the password and scan again."
         )
     except pikepdf.PdfError as exc:
+        # The library's own wording ("Data format error") means nothing to a
+        # document controller, so it goes to the log and not to the screen.
+        logger.debug("pikepdf could not open {}: {}", path, exc)
         info.is_readable = False
         info.error_note = (
-            "This file is damaged and could not be opened. Try re-downloading it "
-            f"from the source. ({exc})"
+            "This file is damaged and could not be opened. Try re-downloading it from the source."
         )
 
 
@@ -187,10 +189,12 @@ def _read_pages(path: str, info: PdfInfo) -> None:
         with open_document(path) as document:
             _collect_pages(document, info)
     except pdfium.PdfiumError as exc:
+        logger.debug("pdfium could not read {}: {}", path, exc)
         info.is_readable = False
         if info.error_note is None:
             info.error_note = (
-                f"This file could not be read as a PDF. It may be damaged or incomplete. ({exc})"
+                "This file could not be read as a PDF. It may be damaged or "
+                "incomplete. Try re-downloading it from the source."
             )
 
 
@@ -250,9 +254,10 @@ def inspect_pdf(path: str | Path, size: int | None = None) -> PdfInfo:
         info.size = size if size is not None else Path(long_path(target)).stat().st_size
     except OSError as exc:
         info.is_readable = False
+        logger.debug("Could not stat {}: {}", target, exc)
         info.error_note = (
-            "This file could not be opened. It may have been moved or the "
-            f"network drive disconnected. ({exc.strerror})"
+            "This file could not be opened. It may have been moved, or the "
+            "network drive may be disconnected."
         )
         return info
 

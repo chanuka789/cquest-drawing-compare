@@ -1,5 +1,6 @@
 /**
- * Types that mirror the Pydantic models in `engine/core/models.py`.
+ * Types that mirror the Pydantic models in `engine/core/models.py` and the
+ * response models in `engine/api/`.
  * If a field changes there, change it here in the same commit.
  */
 
@@ -38,18 +39,201 @@ export interface ErrorResponse {
   error: ErrorBody;
 }
 
-/** Set reconciliation result for one sheet. Mirrors `PairStatus`. */
-export type PairStatus = 'matched' | 'new' | 'missing' | 'ambiguous' | 'duplicate';
+// ── Intake ─────────────────────────────────────────────────────────────
+
+export type IssueSide = 'old' | 'new';
+
+/** Whether the current issue is the whole set or only what changed. */
+export type IssueType = 'full' | 'partial' | 'unknown';
+
+/** How a drawing number was found. Shown so the user knows what to trust. */
+export type NumberSource =
+  | 'titleblock'
+  | 'sheet_text'
+  | 'filename'
+  | 'drawing_list'
+  | 'user'
+  | 'ai'
+  | 'none';
+
+/** State of one issue folder. */
+export interface SideState {
+  side: IssueSide;
+  folder: string | null;
+  headline: string;
+  file_count: number;
+  sheet_count: number;
+  identified_count: number;
+  attention_count: number;
+  is_scanning: boolean;
+  error: string | null;
+  other_files: Record<string, number>;
+  skipped_count: number;
+}
+
+/** One drawing sheet in a folder panel's list. */
+export interface SheetRow {
+  abs_path: string;
+  filename: string;
+  page_index: number;
+  page_count: number;
+  drawing_no: string | null;
+  title: string | null;
+  revision: string | null;
+  scale: string | null;
+  sheet_size: string | null;
+  source_of_number: NumberSource;
+  source_explanation: string;
+  number_mismatch: boolean;
+  is_readable: boolean;
+  looks_scanned: boolean;
+  warnings: string[];
+}
+
+/** A file that could not be read, and what to do about it. */
+export interface QuarantinedFile {
+  path: string;
+  filename: string;
+  reason: string;
+  label: string;
+  detail: string;
+  advice: string;
+}
+
+// ── The output folder ──────────────────────────────────────────────────
+
+export interface OutputValidation {
+  path: string;
+  exists: boolean;
+  is_writable: boolean;
+  is_inside_input: boolean;
+  is_same_as_input: boolean;
+  is_empty: boolean;
+  free_bytes: number;
+  errors: string[];
+  warnings: string[];
+  is_valid: boolean;
+}
+
+// ── The register ───────────────────────────────────────────────────────
+
+export type RegisterStatus =
+  | 'revised'
+  | 'unchanged'
+  | 'same_rev_different_file'
+  | 'new'
+  | 'not_reissued'
+  | 'removed'
+  | 'superseded_in_folder'
+  | 'duplicate_file'
+  | 'unidentified'
+  | 'unreadable'
+  | 'in_list_not_in_folder'
+  | 'in_folder_not_in_list'
+  | 'status_change';
+
+/** One line of the register: a drawing, across both issues. */
+export interface RegisterRow {
+  drawing_no: string;
+  status: RegisterStatus;
+  title: string | null;
+  old_revision: string | null;
+  new_revision: string | null;
+  old_path: string | null;
+  new_path: string | null;
+  old_page: number | null;
+  new_page: number | null;
+  source_of_number: NumberSource;
+  number_mismatch: boolean;
+  needs_attention: boolean;
+  note: string;
+  in_drawing_list: boolean | null;
+  superseded_paths: string[];
+  duplicate_paths: string[];
+}
+
+export interface RegisterSummary {
+  counts: Partial<Record<RegisterStatus, number>>;
+  old_sheet_count: number;
+  new_sheet_count: number;
+  issue_type: IssueType;
+  attention_count: number;
+  comparable_count: number;
+  sentence: string;
+}
+
+/** Asked instead of guessing when the two sets are very different sizes. */
+export interface IssueTypeQuestion {
+  old_count: number;
+  new_count: number;
+  question: string;
+  options: { id: string; label: string; description: string }[];
+}
+
+export interface ReconcileResult {
+  rows: RegisterRow[];
+  summary: RegisterSummary;
+  needs_issue_type_confirmation: boolean;
+  issue_type_question: IssueTypeQuestion | null;
+}
+
+// ── The drawing list ───────────────────────────────────────────────────
+
+export interface ParsedListRow {
+  row_number: number;
+  drawing_no: string;
+  title: string | null;
+  revision: string | null;
+  status: string | null;
+  date: string | null;
+}
+
+export interface ListParseResult {
+  source_path: string;
+  sheet_name: string | null;
+  sheet_names: string[];
+  header_row: number | null;
+  mapping: Record<string, string>;
+  columns: string[];
+  preview: ParsedListRow[];
+  row_count: number;
+  is_revision_matrix: boolean;
+  revision_columns: string[];
+  warnings: string[];
+  confidence: number;
+  ok: boolean;
+}
+
+// ── Progress ───────────────────────────────────────────────────────────
+
+export type ProgressStage = 'scan' | 'inspect' | 'extract' | 'reconcile' | 'export';
+export type ProgressKind = 'started' | 'progress' | 'finished' | 'failed' | 'cancelled';
+
+export interface ProgressEvent {
+  run_id: string;
+  stage: ProgressStage;
+  kind: ProgressKind;
+  current: number;
+  total: number;
+  current_item: string;
+  elapsed: number;
+  message: string;
+  fraction: number;
+  eta: number | null;
+  detail: Record<string, unknown>;
+}
+
+// ── Options ────────────────────────────────────────────────────────────
+
+/** A shipped or user-saved sheet profile. */
+export interface SheetProfileOption {
+  id: string;
+  label: string;
+}
 
 /** Tolerance is always in millimetres at drawing scale, never in pixels. */
 export interface ToleranceOption {
   id: string;
   label: string;
   millimetres: number;
-}
-
-/** A shipped or user-saved sheet profile. */
-export interface SheetProfileOption {
-  id: string;
-  label: string;
 }

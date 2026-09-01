@@ -133,11 +133,12 @@ class ComparisonSession:
                 )
                 state.sheets = sheets
                 state.deep = deep
-            except Exception as exc:
+            except Exception:
                 logger.exception("Deep pass failed for {}", side)
                 state.error = (
-                    "The drawings in this folder could not be read. "
-                    f"The details are in the log file. ({exc})"
+                    "The drawings in this folder could not be read. Check the "
+                    "folder is still reachable, then try again. The details are "
+                    "in the log file."
                 )
             finally:
                 state.is_scanning = False

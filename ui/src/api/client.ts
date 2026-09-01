@@ -11,7 +11,19 @@
  *    VITE_API_BASE if you run it somewhere else.
  */
 
-import type { ErrorResponse, HealthResponse } from './types';
+import type {
+  ErrorResponse,
+  HealthResponse,
+  IssueSide,
+  IssueType,
+  ListParseResult,
+  OutputValidation,
+  QuarantinedFile,
+  ReconcileResult,
+  SheetProfileOption,
+  SheetRow,
+  SideState,
+} from './types';
 import { getApiPort, waitForBridge } from '../lib/native';
 
 const DEV_FALLBACK_BASE = 'http://127.0.0.1:8000';
@@ -141,4 +153,106 @@ export function post<T>(path: string, body?: unknown): Promise<T> {
 /** Ask the engine whether it is running, and what it is. */
 export function fetchHealth(): Promise<HealthResponse> {
   return get<HealthResponse>('/api/health');
+}
+
+export function del<T>(path: string): Promise<T> {
+  return request<T>(path, { method: 'DELETE' });
+}
+
+// ── Intake ─────────────────────────────────────────────────────────────
+
+/** Choose an issue folder. Returns as soon as the fast pass is done. */
+export function setFolder(side: IssueSide, folder: string): Promise<SideState> {
+  return post<SideState>('/api/folder', { side, folder });
+}
+
+/** Start the deep pass. Progress arrives on the WebSocket. */
+export function startScan(side: IssueSide): Promise<{ run_id: string }> {
+  return post<{ run_id: string }>(`/api/scan/${side}`);
+}
+
+export function cancelScan(): Promise<{ cancelled: boolean }> {
+  return post<{ cancelled: boolean }>('/api/scan/cancel');
+}
+
+export function fetchSides(): Promise<SideState[]> {
+  return get<SideState[]>('/api/sides');
+}
+
+export function fetchSheets(side: IssueSide): Promise<SheetRow[]> {
+  return get<SheetRow[]>(`/api/sheets/${side}`);
+}
+
+export function fetchQuarantine(): Promise<QuarantinedFile[]> {
+  return get<QuarantinedFile[]>('/api/quarantine');
+}
+
+// ── Output folder ──────────────────────────────────────────────────────
+
+export function fetchOutputSuggestion(): Promise<{ folder: string | null }> {
+  return get<{ folder: string | null }>('/api/output/suggestion');
+}
+
+export function validateOutput(folder: string): Promise<OutputValidation> {
+  return post<OutputValidation>('/api/output/validate', { folder });
+}
+
+export function setOutput(folder: string): Promise<{ workspace: Record<string, string> }> {
+  return post<{ workspace: Record<string, string> }>('/api/output', { folder });
+}
+
+// ── Options ────────────────────────────────────────────────────────────
+
+export function fetchProfiles(): Promise<SheetProfileOption[]> {
+  return get<SheetProfileOption[]>('/api/profiles');
+}
+
+export function setOptions(options: {
+  profile_id?: string;
+  tolerance_mm?: number;
+}): Promise<{ profile_id: string; tolerance_mm: number }> {
+  return post('/api/options', options);
+}
+
+export function resetSession(): Promise<{ reset: boolean }> {
+  return post<{ reset: boolean }>('/api/session/reset');
+}
+
+// ── The drawing list ───────────────────────────────────────────────────
+
+export function previewDrawingList(path: string): Promise<ListParseResult> {
+  return post<ListParseResult>('/api/drawing-list/preview', { path });
+}
+
+export function applyListMapping(
+  mapping: Record<string, string>,
+  sheetName?: string,
+): Promise<ListParseResult> {
+  return post<ListParseResult>('/api/drawing-list/mapping', {
+    mapping,
+    sheet_name: sheetName ?? null,
+  });
+}
+
+export function clearDrawingList(): Promise<{ cleared: boolean }> {
+  return del<{ cleared: boolean }>('/api/drawing-list');
+}
+
+// ── The register ───────────────────────────────────────────────────────
+
+export function buildRegister(issueType: IssueType): Promise<ReconcileResult> {
+  return post<ReconcileResult>('/api/register', { issue_type: issueType });
+}
+
+export function correctDrawingNumber(body: {
+  abs_path: string;
+  page_index: number;
+  drawing_no: string;
+  apply_to_all: boolean;
+}): Promise<{ corrected: number; also_applied: number }> {
+  return post('/api/register/correct', body);
+}
+
+export function exportRegister(): Promise<{ path: string; folder: string }> {
+  return post<{ path: string; folder: string }>('/api/register/export');
 }

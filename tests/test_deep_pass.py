@@ -439,3 +439,26 @@ def test_pdfium_reads_survive_concurrent_threads(tmp_path: Path):
 
     assert unreadable == [], f"{len(unreadable)} good drawings were reported unreadable"
     assert empty_text == [], f"{len(empty_text)} good drawings returned no text"
+
+
+def test_error_notes_never_leak_library_jargon(mixed_folder: Path):
+    """No stack traces or library wording reach the user.
+
+    "PDFium: Data format error" means nothing to a document controller. The
+    note must say what happened and what to do next.
+    """
+    jargon = ("pdfium", "pikepdf", "traceback", "exception", "errno", "0x")
+
+    for name in ("locked.pdf", "damaged.pdf", "empty.pdf"):
+        note = inspect_pdf(mixed_folder / name).error_note or ""
+        lowered = note.lower()
+
+        assert note, f"{name} has no explanation"
+        for word in jargon:
+            assert word not in lowered, f"{name} note leaks {word!r}: {note}"
+
+        # Every note tells the reader what to do next.
+        assert any(
+            hint in lowered
+            for hint in ("ask the sender", "re-download", "check", "try", "scan again")
+        ), f"{name} note gives no next step: {note}"

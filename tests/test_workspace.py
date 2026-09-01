@@ -83,11 +83,12 @@ def test_a_folder_that_does_not_exist_yet_is_allowed_with_a_note(tmp_path: Path)
     assert any("will be created" in warning for warning in result.warnings)
 
 
-def test_a_location_that_does_not_exist_is_refused(tmp_path: Path):
+def test_missing_levels_under_an_existing_folder_are_created(tmp_path: Path):
+    """Several levels at once is normal, and `create_workspace` makes them."""
     result = validate_output_folder(tmp_path / "no" / "such" / "place")
 
-    assert not result.is_valid
-    assert "network drive" in result.errors[0]
+    assert result.is_valid
+    assert any("will be created" in warning for warning in result.warnings)
 
 
 def test_a_non_empty_folder_warns_but_does_not_block(tmp_path: Path):
@@ -204,3 +205,24 @@ def test_the_audit_log_records_what_was_run(tmp_path: Path):
     assert payload["issue_type"] == "partial"
     assert payload["counts"]["revised"] == 12
     assert payload["profile"] == "keo"
+
+
+def test_a_folder_several_levels_deep_can_still_be_created(tmp_path: Path):
+    """Regression: the suggested output path is two levels deep.
+
+    `<parent>/Comparisons/Compare_RevC_to_RevD_<date>` has neither level yet,
+    so validating only the immediate parent rejected the app's own suggestion
+    with "That location does not exist".
+    """
+    result = validate_output_folder(tmp_path / "Comparisons" / "Compare_RevC_to_RevD_2026-09-01")
+
+    assert result.is_valid, result.errors
+    assert result.is_writable
+    assert any("will be created" in warning for warning in result.warnings)
+
+
+def test_a_path_on_a_drive_that_is_gone_is_still_refused():
+    result = validate_output_folder(r"Q:\no-such-drive\output")
+
+    assert not result.is_valid
+    assert "network drive" in result.errors[0]
