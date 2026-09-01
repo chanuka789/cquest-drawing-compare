@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from engine.api.app import create_app
+from engine.settings import Settings
 from engine.storage.schema import SCHEMA_VERSION
 from engine.utils.errors import AlignmentFailedError, NotFoundError
 
@@ -33,7 +34,8 @@ def test_unknown_api_route_returns_structured_error(client: TestClient):
 
 
 def test_app_error_becomes_structured_json():
-    app: FastAPI = create_app()
+    # dev settings: no SPA catch-all, so a route added here is still reachable.
+    app: FastAPI = create_app(Settings(dev_mode=True, log_level="INFO"))
 
     @app.get("/api/_test/missing")
     def _missing() -> None:
@@ -49,7 +51,7 @@ def test_app_error_becomes_structured_json():
 
 
 def test_error_detail_is_carried_through():
-    app: FastAPI = create_app()
+    app: FastAPI = create_app(Settings(dev_mode=True, log_level="INFO"))
 
     @app.get("/api/_test/alignment")
     def _alignment() -> None:
@@ -64,9 +66,7 @@ def test_error_detail_is_carried_through():
     assert error["detail"]["rms_error"] == 42.5
 
 
-def test_cors_is_enabled_only_in_dev_mode(monkeypatch, tmp_path):
-    from engine.settings import Settings
-
+def test_cors_is_enabled_only_in_dev_mode():
     dev = create_app(Settings(dev_mode=True, log_level="INFO"))
     prod = create_app(Settings(dev_mode=False, log_level="INFO"))
 
@@ -82,8 +82,31 @@ def test_cors_is_enabled_only_in_dev_mode(monkeypatch, tmp_path):
 
 
 def test_docs_are_hidden_in_production():
-    from engine.settings import Settings
-
     prod = create_app(Settings(dev_mode=False, log_level="INFO"))
     with TestClient(prod) as client:
         assert client.get("/api/openapi.json").status_code == 404
+
+
+def test_production_serves_the_built_ui_but_not_the_api_namespace(tmp_path):
+    """The SPA fallback must never answer for an unknown /api path."""
+    from engine.api import app as app_module
+
+    dist = tmp_path / "ui" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<div id='root'></div>", encoding="utf-8")
+
+    original = app_module.ui_dist_dir
+    app_module.ui_dist_dir = lambda: dist
+    try:
+        prod = create_app(Settings(dev_mode=False, log_level="INFO"))
+        with TestClient(prod) as client:
+            spa = client.get("/register")
+            missing_api = client.get("/api/not-a-route")
+    finally:
+        app_module.ui_dist_dir = original
+
+    assert spa.status_code == 200
+    assert "id='root'" in spa.text
+
+    assert missing_api.status_code == 404
+    assert missing_api.json()["error"]["code"] == "http_404"

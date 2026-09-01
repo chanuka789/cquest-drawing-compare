@@ -126,8 +126,14 @@ def _mount_ui(app: FastAPI) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:
-        candidate = dist / full_path
-        if full_path and candidate.is_file():
+        # An unknown API path must still fail as JSON. Without this, every
+        # mistyped endpoint would return the HTML page with status 200 and
+        # the frontend would try to parse a document as a response.
+        if full_path.startswith("api/"):
+            raise StarletteHTTPException(status_code=404, detail="Not Found")
+
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(dist.resolve()):
             return FileResponse(candidate)
         return FileResponse(index)
 

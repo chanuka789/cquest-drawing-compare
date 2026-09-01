@@ -1,0 +1,44 @@
+/**
+ * Application-level state: is the engine reachable, and what is it.
+ *
+ * Screen state lives in its own store. This one holds only what every screen
+ * needs to know.
+ */
+
+import { create } from 'zustand';
+
+import { ApiError, fetchHealth } from '../api/client';
+import type { HealthResponse } from '../api/types';
+import { isDesktop } from '../lib/native';
+
+export type ConnectionStatus = 'idle' | 'connecting' | 'ready' | 'error';
+
+interface AppState {
+  status: ConnectionStatus;
+  health: HealthResponse | null;
+  errorMessage: string | null;
+  /** True inside the desktop shell, false in a plain browser tab. */
+  desktop: boolean;
+  connect: () => Promise<void>;
+}
+
+export const useAppStore = create<AppState>((set) => ({
+  status: 'idle',
+  health: null,
+  errorMessage: null,
+  desktop: false,
+
+  connect: async () => {
+    set({ status: 'connecting', errorMessage: null });
+    try {
+      const health = await fetchHealth();
+      set({ status: 'ready', health, errorMessage: null, desktop: isDesktop() });
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : 'The engine could not be reached. Start it and try again.';
+      set({ status: 'error', health: null, errorMessage: message, desktop: isDesktop() });
+    }
+  },
+}));
