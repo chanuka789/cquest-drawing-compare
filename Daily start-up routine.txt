@@ -1,0 +1,29 @@
+Your daily start-up routine
+
+Every time you sit down to work, open PowerShell and run:
+
+powershell
+cd D:\GitHub\cquest-drawing-compare
+.\.venv\Scripts\Activate.ps1
+code .
+
+Your prompt should show (.venv) at the front. If it does not, the environment is not active and Python will use the wrong packages.
+
+Then in VS Code, open two terminals (Ctrl + ` to open, then click the + icon for the second one):
+
+Terminal 1 — the backend:
+
+powershell
+cd D:\GitHub\cquest-drawing-compare
+.\.venv\Scripts\Activate.ps1
+python -m engine.main
+
+Terminal 2 — the frontend:
+
+powershell
+cd D:\GitHub\cquest-drawing-compare\ui
+npm run dev
+
+Leave both running while you work. The frontend reloads automatically when you save a file. The backend needs a restart (Ctrl + C, then run again) when you change Python code.
+
+Note: python -m engine.main will not work yet, because the engine folder does not exist. That comes in Phase 1. For now, only Terminal 2 will run.
