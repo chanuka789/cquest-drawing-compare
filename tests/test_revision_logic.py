@@ -16,7 +16,6 @@ from engine.register.revision_logic import (
     parse_revision,
 )
 
-
 # ── Cleaning messy input ───────────────────────────────────────────────
 
 
