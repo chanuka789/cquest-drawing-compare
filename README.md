@@ -6,8 +6,12 @@ revision comparison, for quantity surveyors and document controllers.
 **Local-first.** Drawings are processed on the machine they sit on. AI is
 optional, off by default, and every feature works without it.
 
-Current state: **Phase 1 — Skeleton.** The shell, the database and the Setup
-screen. No PDF processing or comparison logic yet.
+Current state: **Phase 2 — Intake & register.** Point it at two issue folders
+and it reads every drawing, works out what is new, missing, revised and
+unchanged, and exports a register you can send to the design team.
+
+No image rendering, alignment or overlay comparison yet — those are Phase 4
+and later.
 
 ---
 
@@ -16,6 +20,9 @@ screen. No PDF processing or comparison logic yet.
 | Path | What it is |
 |---|---|
 | `engine/` | Python backend: FastAPI API, SQLite storage, the pywebview shell |
+| `engine/ingest/` | Folder scanning, PDF inspection, hashing, quarantine |
+| `engine/titleblock/` | Reading the drawing number, title, revision and scale |
+| `engine/register/` | Revision logic, reconciliation, drawing list import |
 | `ui/` | React + TypeScript frontend built with Vite |
 | `packaging/` | PyInstaller spec, build script, application icon |
 | `profiles/` | Shipped client sheet profiles (Phase 2) |
@@ -115,3 +122,36 @@ These are enforced in review, and explained in `CLAUDE.md`.
 
 See `LICENSE.txt`. Commercial product — check the licence terms of every
 dependency before shipping.
+
+
+---
+
+## What Phase 2 does
+
+1. **Scan** both issue folders. The fast pass lists the files in under two
+   seconds without opening a single PDF; the deep pass then opens each one in
+   a process pool, streaming progress, and the rows fill in as it goes.
+   Re-scanning an unchanged folder is instant, because results are cached by
+   path, size and modified time.
+2. **Identify** each sheet from its own title block — drawing number, title,
+   revision, scale — and record **how** the number was found, so a reader can
+   judge which rows to trust. A disagreement between the title block and the
+   file name is flagged.
+3. **Reconcile** the two sets into a register: revised, unchanged, new, not
+   reissued, removed, same revision but a different file, unidentified,
+   unreadable, and the drawing-list cross-checks.
+4. **Export** an Excel workbook with a summary you can paste into an email, the
+   full register, a "needs attention" sheet, and the quarantine list — plus a
+   JSON audit log of exactly what was run.
+
+### Two rules that shape the answers
+
+**A partial issue is normal.** Consultants reissue the twelve sheets that
+changed, not all three hundred. When the two sets are very different sizes and
+nobody has said which kind of issue this is, the application asks rather than
+guessing — because reporting "288 drawings removed" on a partial issue makes a
+correct tool look broken.
+
+**Same revision, different file.** When the revision matches but the content
+hash does not, somebody reissued a drawing without bumping the revision. It is
+easy to miss by hand, and it is flagged prominently.

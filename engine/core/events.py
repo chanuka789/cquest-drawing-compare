@@ -153,6 +153,14 @@ class ProgressBus:
 #: One bus per process. The engine runs in a single process.
 progress_bus = ProgressBus()
 
+#: Set when the engine is shutting down.
+#:
+#: Long-lived readers (the progress WebSocket) poll this and return, so
+#: Uvicorn's graceful shutdown is not left waiting on a socket that would
+#: otherwise loop forever. Without it, closing the window took the full
+#: shutdown timeout before the process would exit.
+shutdown_requested = threading.Event()
+
 
 class RunReporter:
     """Convenience wrapper so callers do not build events by hand."""

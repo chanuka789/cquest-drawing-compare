@@ -26,6 +26,7 @@ from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from engine.api import routes_ingest, routes_register, routes_system, ws_progress
+from engine.core.events import shutdown_requested
 from engine.core.project import ensure_workspace_db
 from engine.settings import Settings, get_settings
 from engine.storage.paths import bundle_root, get_app_paths
@@ -55,6 +56,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    # Tell long-lived readers to let go, so shutdown is prompt.
+    shutdown_requested.set()
     engine.dispose()
     logger.info("Engine stopped")
 
@@ -151,6 +154,7 @@ def _mount_ui(app: FastAPI) -> None:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application. Call this rather than importing a global."""
     settings = settings or get_settings()
+    shutdown_requested.clear()
 
     if not is_configured():
         setup_logging()

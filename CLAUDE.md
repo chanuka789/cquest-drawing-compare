@@ -91,10 +91,28 @@ No image rendering, no alignment, no comparison. Those are Phase 4+.
 - The app never writes into the user's input folders. All output goes
   to the output folder the user chose.
 
-## Known real-world facts (learned from fixtures, keep in mind)
+## Known real-world facts (learned the hard way, keep in mind)
 
-- A PDF page box is NOT always at the origin. The Lami Architects
+- **A PDF page box is NOT always at the origin.** The Lami Architects
   fixture has a mediabox of (-1192, -842, 1192, 842). Always compute
   zones from `page.get_mediabox()`, never from `(0, 0, width, height)`.
-- Title block values sit BELOW their label as often as to the right.
-  `Drawing No.` -> value below; `Scale` -> value to the right.
+- **Title block values sit BELOW their label as often as to the right.**
+  `Drawing No.` -> value below; `Scale` -> value to the right. Weight the
+  off-axis offset when matching, or the neighbouring cell wins on a tie
+  and every sheet reads as the project number.
+- **Label order is priority order.** "drawing title" must beat
+  "description", or a materials legend headed DESCRIPTION is mistaken
+  for the title block.
+- **pdfium is NOT thread-safe.** Under concurrent use it reports good
+  PDFs as `Data format error`, so valid drawings get quarantined as
+  damaged. Every document goes through
+  `engine/utils/pdf_runtime.open_document`. Parallelism comes from the
+  process pool, where each worker has its own pdfium.
+- **PyInstaller + multiprocessing needs `freeze_support()` first thing
+  in `main()`**, or every pool worker opens its own application window.
+- **Uvicorn waits for open connections before running lifespan
+  shutdown.** Long-lived readers must watch
+  `engine.core.events.shutdown_requested`, which `EngineServer.stop()`
+  raises *before* setting `should_exit`.
+- **Register literal API routes before parameterised ones.**
+  `/api/scan/{side}` declared first swallows `/api/scan/cancel`.
