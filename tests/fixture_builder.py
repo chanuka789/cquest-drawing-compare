@@ -94,14 +94,12 @@ def _content_stream(spec: SheetSpec, x0: float, y0: float) -> bytes:
 
     for local_x, local_y, size, text in items:
         parts.append(
-            f"BT /F1 {size} Tf {x0 + local_x:.2f} {y0 + local_y:.2f} Td "
-            f"({_escape(text)}) Tj ET"
+            f"BT /F1 {size} Tf {x0 + local_x:.2f} {y0 + local_y:.2f} Td ({_escape(text)}) Tj ET"
         )
 
     # A border, so the sheet is not a blank page.
     parts.append(
-        f"0.5 w {x0 + 20:.2f} {y0 + 20:.2f} "
-        f"{spec.width - 40:.2f} {spec.height - 40:.2f} re S"
+        f"0.5 w {x0 + 20:.2f} {y0 + 20:.2f} {spec.width - 40:.2f} {spec.height - 40:.2f} re S"
     )
     return "\n".join(parts).encode("latin-1")
 
@@ -145,7 +143,7 @@ def build_pdf(
         )
         pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
 
-    with pdf.open_metadata() as meta:
+    with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
         meta["pdf:Producer"] = producer
 
     if password is None:
@@ -328,7 +326,9 @@ def build_messy_folder(root: str | Path) -> Path:
     (root / "Copy of A-101-Rev-C.pdf").write_bytes(duplicate_source.read_bytes())
 
     # Superseded material that must be skipped whole.
-    build_pdf(root / "superseded" / "A-101-Rev-B.pdf", [SheetSpec(drawing_no="A-101", revision="B")])
+    build_pdf(
+        root / "superseded" / "A-101-Rev-B.pdf", [SheetSpec(drawing_no="A-101", revision="B")]
+    )
     build_pdf(root / "_archive" / "A-999-Rev-A.pdf", [SheetSpec(drawing_no="A-999")])
 
     # Junk the scanner must exclude.

@@ -22,6 +22,7 @@ and report which port the engine is listening on.
 from __future__ import annotations
 
 import contextlib
+import multiprocessing
 import socket
 import sys
 import threading
@@ -263,6 +264,12 @@ def fail_loudly(message: str) -> None:
 
 def main() -> int:
     """Start the engine, open the window, and shut everything down cleanly."""
+    # MUST be the first thing that happens. The deep pass uses a process pool,
+    # and on Windows a frozen build spawns workers by re-running this same
+    # executable. Without this call each worker would open its own copy of the
+    # application window instead of doing the work.
+    multiprocessing.freeze_support()
+
     settings = get_settings()
     setup_logging()
 
