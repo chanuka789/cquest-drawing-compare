@@ -74,6 +74,27 @@ Ruff `target-version` stays at `py313` so the code remains 3.13-compatible.
 
 ## Current phase
 
-Phase 1 — Skeleton. Building the shell, database, and Setup screen only.
-No PDF processing, no comparison logic yet. Do not add features from
-later phases even if they seem easy.
+Phase 2 — Intake & register. Scanning folders, identifying drawings,
+reconciling the two sets, exporting the register.
+No image rendering, no alignment, no comparison. Those are Phase 4+.
+
+## Phase 2 rules
+
+- Scanning must show results progressively. Never block the UI while
+  reading a network folder.
+- Every scan result is cached by (path, size, mtime). Re-scanning an
+  unchanged folder must be near-instant.
+- Every drawing number records HOW it was found (title block, filename,
+  drawing list, or user). The user must be able to see and trust this.
+- A missing drawing in a partial issue is NOT a deleted drawing.
+  Never use the word "removed" until the issue type is known.
+- The app never writes into the user's input folders. All output goes
+  to the output folder the user chose.
+
+## Known real-world facts (learned from fixtures, keep in mind)
+
+- A PDF page box is NOT always at the origin. The Lami Architects
+  fixture has a mediabox of (-1192, -842, 1192, 842). Always compute
+  zones from `page.get_mediabox()`, never from `(0, 0, width, height)`.
+- Title block values sit BELOW their label as often as to the right.
+  `Drawing No.` -> value below; `Scale` -> value to the right.
