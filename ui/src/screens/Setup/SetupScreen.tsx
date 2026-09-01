@@ -41,6 +41,16 @@ export function SetupScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Safety net. The socket is the fast path, but a dropped frame must never
+  // leave the panels stuck reporting "reading…" for a scan that has finished.
+  const scanning = state.old.is_scanning || state.new.is_scanning;
+  useEffect(() => {
+    if (!scanning) return;
+    const timer = window.setInterval(() => void state.refreshAll(), 1500);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanning]);
+
   const tolerance = TOLERANCES.find((option) => option.id === state.toleranceId);
   const validation = state.outputValidation;
 

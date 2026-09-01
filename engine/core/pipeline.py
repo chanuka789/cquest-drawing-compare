@@ -18,7 +18,7 @@ from typing import Any
 from loguru import logger
 
 from engine.core.enums import Side
-from engine.core.events import ProgressBus, Stage
+from engine.core.events import ProgressBus, RunReporter, Stage
 from engine.core.jobs import BatchResult, CancelToken, run_batch
 from engine.core.models import SheetRecord
 from engine.extract.text_extractor import extract_document_text
@@ -144,15 +144,30 @@ def identify_sheets(
     side: Side,
     profile: SheetProfile | None = None,
     hash_content: bool = True,
+    run_id: str | None = None,
+    bus: ProgressBus | None = None,
 ) -> list[SheetRecord]:
     """Turn inspected files into sheet records, one per page.
 
     A file is not a drawing: one PDF can hold twenty of them. The unit of work
     from here on is the sheet, which is why this expands multi-page files.
+
+    This reports its own progress. Reading every title block takes longer than
+    the inspection pass that precedes it, so without a stage of its own the
+    progress rail would sit at "finished" while the slower half was still
+    running, and the UI would never learn that the sheets had arrived.
     """
     profile = profile or load_profile()
     by_path = {item.abs_path: item for item in files}
     records: list[SheetRecord] = []
+
+    reporter = (
+        RunReporter(run_id, Stage.EXTRACT, total=len(infos), bus=bus)
+        if run_id is not None
+        else None
+    )
+    if reporter is not None:
+        reporter.started()
 
     for info in infos:
         scanned = by_path.get(info.path)
@@ -171,6 +186,8 @@ def identify_sheets(
                     error_note=info.error_note,
                 )
             )
+            if reporter is not None:
+                reporter.advance(filename)
             continue
 
         # Hashing is what separates `unchanged` from `same_rev_different_file`,
@@ -224,6 +241,12 @@ def identify_sheets(
 
             records.append(record)
 
+        if reporter is not None:
+            reporter.advance(filename)
+
+    if reporter is not None:
+        reporter.finished(f"Read {len(records)} drawings.")
+
     return records
 
 
@@ -254,7 +277,9 @@ def intake_folder(
     """Scan, inspect and identify one issue folder, start to finish."""
     scan = scan_folder(folder)
     deep = deep_inspect(scan.drawings, run_id=run_id, cache=cache, cancel=cancel, bus=bus)
-    sheets = identify_sheets(scan.drawings, deep.infos, side=side, profile=profile)
+    sheets = identify_sheets(
+        scan.drawings, deep.infos, side=side, profile=profile, run_id=run_id, bus=bus
+    )
 
     logger.info(
         "Intake {} | {} files -> {} sheets ({} identified)",
