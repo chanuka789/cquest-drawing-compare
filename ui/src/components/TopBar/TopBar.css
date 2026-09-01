@@ -1,0 +1,39 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: 52px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--room-300);
+  background: var(--room-700);
+  z-index: var(--z-chrome);
+  flex: 0 0 auto;
+}
+
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The seam, reduced to a mark. The same idea used everywhere in the app. */
+.topbar__mark {
+  width: 3px;
+  height: 20px;
+  background: var(--brand);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 12px var(--brand-glow);
+}
+
+.topbar__title {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.01em;
+}
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}

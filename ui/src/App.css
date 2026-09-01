@@ -1,70 +1,8 @@
-/* Temporary Phase 1 boot screen. Replaced by the Setup screen in Task 1.7. */
+/* The application shell: a dark, quiet drawing room. */
 
-.boot {
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: var(--space-5);
+.shell {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  padding: var(--space-6);
-  text-align: center;
-}
-
-.boot__seam {
-  width: 2px;
-  height: 72px;
-  background: var(--brand);
-  box-shadow: 0 0 24px var(--brand-glow);
-}
-
-.boot__note {
-  color: var(--text-mid);
-}
-
-.boot__note--error {
-  color: var(--warn);
-  max-width: 46ch;
-}
-
-.boot__retry {
-  padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-md);
-  background: var(--brand);
-  color: var(--text-on-brand);
-  font-weight: var(--weight-medium);
-  transition: background var(--duration-fast) var(--ease-out);
-}
-
-.boot__retry:hover {
-  background: var(--brand-soft);
-}
-
-.boot__facts {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: var(--space-2) var(--space-5);
-  align-items: baseline;
-  padding: var(--space-5) var(--space-6);
-  border: 1px solid var(--room-300);
-  border-radius: var(--radius-lg);
-  background: var(--room-700);
-  box-shadow: var(--shadow-raised);
-  text-align: left;
-}
-
-.boot__facts dt {
-  color: var(--text-low);
-  font-size: var(--text-micro);
-  font-weight: var(--weight-medium);
-}
-
-.boot__facts dd {
-  margin: 0;
-  color: var(--text-hi);
-}
-
-.boot__path {
-  max-width: 52ch;
-  overflow-wrap: anywhere;
-  color: var(--text-mid);
+  background: var(--room-900);
 }

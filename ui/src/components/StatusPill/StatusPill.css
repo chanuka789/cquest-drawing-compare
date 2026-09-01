@@ -1,0 +1,45 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  background: var(--room-500);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.pill--neutral .pill__dot {
+  background: var(--text-low);
+}
+
+.pill--ok .pill__dot {
+  background: var(--ok);
+}
+
+.pill--warn .pill__dot {
+  background: var(--warn);
+}
+
+.pill--info .pill__dot {
+  background: var(--info);
+}
+
+.pill--danger .pill__dot {
+  background: var(--danger);
+}
+
+.pill--warn,
+.pill--danger {
+  color: var(--text-hi);
+}
