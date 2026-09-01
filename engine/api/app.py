@@ -26,6 +26,7 @@ from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from engine.api import routes_system
+from engine.core.project import ensure_workspace_db
 from engine.settings import Settings, get_settings
 from engine.storage.paths import bundle_root, get_app_paths
 from engine.utils.errors import AppError
@@ -47,7 +48,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.dev_mode,
         paths.root,
     )
+
+    # Prove the storage layer on the real machine, not only in the tests.
+    engine = ensure_workspace_db()
+    app.state.db = engine
+
     yield
+
+    engine.dispose()
     logger.info("Engine stopped")
 
 
