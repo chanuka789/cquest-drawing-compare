@@ -1,0 +1,106 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   C-Quest Drawing Compare — design tokens
+
+   The concept is the light table: a dark, quiet drawing room, with the
+   sheet as the only bright thing on screen.
+
+   ⚠ THE ONE RULE THAT MATTERS
+
+   Brand red (--brand) belongs to the CHROME ONLY — logo, primary buttons,
+   active tab, focus ring, the seam. Inside the drawing canvas, red already
+   means "removed". Use the diff palette there and nothing else:
+
+       old  --diff-old        #0E63C4  blue
+       new  --diff-new        #E8442A  red-orange
+       unchanged --diff-none  55% grey
+
+   If brand red appears inside the canvas, users will misread the output.
+
+   No component may hard-code a colour. Add a token here instead.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Room: the chrome ─────────────────────────────────────────────── */
+  --room-900: #14181c; /* app shell */
+  --room-700: #1b2127; /* panels, rails */
+  --room-500: #262e36; /* raised surfaces */
+  --room-300: #3a444f; /* borders, dividers */
+  --room-200: #4a5561; /* hover borders */
+
+  /* ── Light: the sheet ─────────────────────────────────────────────── */
+  --sheet: #f7f6f3; /* warm paper, never pure white */
+  --sheet-dim: #e8e6e1;
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text-hi: #edf1f5;
+  --text-mid: #9da9b5;
+  --text-low: #66727e;
+  --text-on-brand: #ffffff;
+  --text-on-sheet: #1b2127;
+
+  /* ── Brand: chrome only ───────────────────────────────────────────── */
+  --brand: #cf0a2c;
+  --brand-soft: #ff3355;
+  --brand-glow: rgba(207, 10, 44, 0.28);
+  --brand-dim: rgba(207, 10, 44, 0.12);
+
+  /* ── Status ───────────────────────────────────────────────────────── */
+  --ok: #2bb673;
+  --warn: #e39a00;
+  --info: #2e9bd6;
+  --danger: #e8442a;
+
+  /* ── Diff palette: inside the lightbox canvas only ────────────────── */
+  --diff-old: #0e63c4;
+  --diff-new: #e8442a;
+  --diff-none: rgba(0, 0, 0, 0.55);
+
+  /* ── Type scale ───────────────────────────────────────────────────── */
+  --font-sans:
+    "Funnel Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
+    "Helvetica Neue", Arial, sans-serif;
+
+  --text-screen-title: 28px;
+  --text-section: 18px;
+  --text-body: 14px;
+  --text-micro: 12px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --leading-tight: 1.2;
+  --leading-body: 1.5;
+
+  /* ── Spacing: 4px base ────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ── Radii ────────────────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* ── Shadows: only two ────────────────────────────────────────────── */
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.24);
+  --shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.48);
+
+  /* ── Motion ───────────────────────────────────────────────────────── */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-seam-pulse: 600ms;
+
+  /* ── Layers ───────────────────────────────────────────────────────── */
+  --z-canvas: 0;
+  --z-chrome: 10;
+  --z-overlay: 100;
+  --z-dialog: 1000;
+}

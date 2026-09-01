@@ -1,21 +1,40 @@
 """Run this to confirm the development environment is ready."""
+
 import importlib
 import platform
 import shutil
 import sys
 
 REQUIRED = [
-    "fastapi", "uvicorn", "webview", "pydantic", "sqlalchemy",
-    "pypdfium2", "pikepdf", "cv2", "numpy", "PIL", "scipy",
-    "skimage", "shapely", "ezdxf", "rapidfuzz", "pandas",
-    "openpyxl", "docx", "xxhash", "loguru", "typer", "httpx",
+    "fastapi",
+    "uvicorn",
+    "webview",
+    "pydantic",
+    "sqlalchemy",
+    "pypdfium2",
+    "pikepdf",
+    "cv2",
+    "numpy",
+    "PIL",
+    "scipy",
+    "skimage",
+    "shapely",
+    "ezdxf",
+    "rapidfuzz",
+    "pandas",
+    "openpyxl",
+    "docx",
+    "xxhash",
+    "loguru",
+    "typer",
+    "httpx",
     "anthropic",
 ]
 
 OPTIONAL = ["sentence_transformers", "torch", "pytesseract"]
 
 
-def check(name):
+def check(name: str) -> bool:
     try:
         importlib.import_module(name)
         return True

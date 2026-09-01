@@ -1,0 +1,59 @@
+[project]
+name = "cquest-drawing-compare"
+version = "0.1.0"
+description = "Construction drawing set reconciliation and revision comparison for Windows"
+authors = [{ name = "Chanuka Mudiyanselage" }]
+requires-python = ">=3.13"
+readme = "README.md"
+dynamic = ["dependencies"]
+
+[project.scripts]
+cquest-drawing-compare = "engine.main:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["engine"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+# ── Lint and format ────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [".venv", "ui", "build", "dist", "Plans"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "SIM",  # simplify
+    "T20",  # flake8-print - loguru only, never print()
+    "ANN",  # missing type annotations
+    "RUF",
+]
+ignore = [
+    "ANN401",  # allow typing.Any where it is genuinely needed
+    "B008",    # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]        # test functions do not need return annotations
+"check_setup.py" = ["T20"] # standalone setup checker prints by design
+"smoke_test.py" = ["T20"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ── Tests ──────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["error::DeprecationWarning:engine.*"]

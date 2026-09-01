@@ -13,6 +13,7 @@ webview.create_window(
       </div>
     </body>
     """,
-    width=900, height=600,
+    width=900,
+    height=600,
 )
 webview.start()

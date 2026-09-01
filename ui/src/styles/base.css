@@ -1,0 +1,181 @@
+/* Base styles: reset, typography, focus, motion.
+   Every colour here comes from tokens.css. Never hard-code one. */
+
+@import "./tokens.css";
+
+/* Funnel Sans is bundled as woff2 so the application works offline.
+   Drop the files into ui/src/styles/fonts/ and uncomment this block.
+   Until then the stack falls back to Segoe UI, which is on every
+   Windows machine, so nothing breaks. */
+
+/*
+@font-face {
+  font-family: "Funnel Sans";
+  src: url("./fonts/FunnelSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Funnel Sans";
+  src: url("./fonts/FunnelSans-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Funnel Sans";
+  src: url("./fonts/FunnelSans-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+*/
+
+/* ── Reset ──────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--room-900);
+  color: var(--text-hi);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden; /* the shell never scrolls; panels scroll internally */
+}
+
+img,
+svg,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Typography roles ───────────────────────────────────────────────── */
+
+h1,
+h2,
+h3 {
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+
+h1 {
+  font-size: var(--text-screen-title);
+}
+
+h2 {
+  font-size: var(--text-section);
+}
+
+/* Drawing numbers and revision codes line up in columns without a second
+   typeface. Use this instead of adding a monospace font. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.micro {
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  color: var(--text-mid);
+}
+
+/* ── Focus ──────────────────────────────────────────────────────────── */
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--brand-dim);
+  color: var(--text-hi);
+}
+
+/* ── Scrollbars, in the room palette ────────────────────────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--room-300) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--room-300);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--room-200);
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Screen-reader-only text that still reaches keyboard users. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
