@@ -341,3 +341,81 @@ def build_messy_folder(root: str | Path) -> Path:
     (root / "drawing-list.xlsx").write_bytes(b"XLSX placeholder")
 
     return root
+
+
+# ── Drawing lists ──────────────────────────────────────────────────────
+
+
+def build_clean_drawing_list(path: str | Path) -> Path:
+    """A tidy register: header on row 1, one row per drawing."""
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Register"
+    sheet.append(["Drawing No", "Title", "Rev"])
+    for number, title, revision in NORMAL_SET:
+        sheet.append([number, title, revision])
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    book.save(target)
+    return target
+
+
+def build_messy_drawing_list(path: str | Path) -> Path:
+    """The register as a human actually formats it.
+
+    Reproduces what real files do: a logo block above the header, the header
+    on row 7, a decoy worksheet, discipline headings inside the data, and
+    blank separator rows.
+    """
+    import openpyxl
+
+    book = openpyxl.Workbook()
+
+    # A decoy sheet, of the kind every real workbook has.
+    notes = book.active
+    notes.title = "Notes"
+    notes.append(["Project information"])
+    notes.append(["Issued by", "Lami Architects"])
+    notes.append(["Contact", "info@example.com"])
+
+    sheet = book.create_sheet("Drawing Register")
+    sheet.append(["ACME ARCHITECTS"])  # 1: logo row
+    sheet.append([])  # 2
+    sheet.append(["Project:", "Al Basateen Farm - Villa"])  # 3
+    sheet.append(["Issue:", "IFC Rev D"])  # 4
+    sheet.append(["Date:", "27/06/2025"])  # 5
+    sheet.append([])  # 6
+    sheet.append(["Dwg No.", "Sheet Name", "Rev.", "Status"])  # 7: the header
+    sheet.append(["ARCHITECTURAL"])  # a discipline heading
+    for number, title, revision in NORMAL_SET[:5]:
+        sheet.append([number, title, revision, "For construction"])
+    sheet.append([])  # separator
+    sheet.append(["STRUCTURAL"])
+    for number, title, revision in NORMAL_SET[5:]:
+        sheet.append([number, title, revision, "For construction"])
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    book.save(target)
+    return target
+
+
+def build_revision_matrix_list(path: str | Path) -> Path:
+    """A register with no Rev column: one column per issue date instead."""
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Register"
+    sheet.append(["Drawing No", "Title", "12/01/2025", "27/06/2025", "01/09/2026"])
+    sheet.append(["A-101", "GROUND FLOOR PLAN", "A", "B", "C"])
+    sheet.append(["A-102", "FIRST FLOOR PLAN", "A", "B", ""])
+    sheet.append(["A-103", "ROOF PLAN", "A", "", ""])
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    book.save(target)
+    return target
