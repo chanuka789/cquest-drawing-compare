@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Node
+ui/node_modules/
+ui/dist/
+
+# Secrets — never commit
+.env
+
+# App data
+*.db
+*.sqlite3
+cache/
+logs/
+outputs/
+
+# Test fixtures — real drawings must not go to GitHub
+tests/fixtures/**/*.pdf
+tests/fixtures/**/*.dwg
+tests/fixtures/**/*.dxf
+
+# Windows
+Thumbs.db
+desktop.ini
