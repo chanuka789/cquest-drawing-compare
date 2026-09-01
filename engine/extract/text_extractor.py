@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 import pypdfium2 as pdfium
 from loguru import logger
 
+from engine.utils.pdf_runtime import open_document, pdfium_access
+
 POINTS_PER_MM = 72.0 / 25.4
 
 
@@ -199,6 +201,13 @@ def extract_page_text(page: pdfium.PdfPage, page_index: int = 0) -> PageText:
     Never raises for a page that cannot be read; an empty result means there
     is no text layer, which is itself a useful answer (the sheet is scanned).
     """
+    # pdfium is not thread-safe, so every read of an open page is guarded.
+    # The lock is re-entrant, so this is free when the caller already holds it.
+    with pdfium_access():
+        return _read_page_text(page, page_index)
+
+
+def _read_page_text(page: pdfium.PdfPage, page_index: int) -> PageText:
     box = _page_box(page)
     result = PageText(page_index=page_index, box=box, rotation=page.get_rotation())
 
@@ -246,19 +255,13 @@ def extract_page_text(page: pdfium.PdfPage, page_index: int = 0) -> PageText:
 
 def extract_document_text(path: str, pages: list[int] | None = None) -> dict[int, PageText]:
     """Read text from a whole PDF, or just the pages listed."""
-    from engine.utils.longpath import long_path
-
     output: dict[int, PageText] = {}
-    document = None
     try:
-        document = pdfium.PdfDocument(long_path(path))
-        indices = pages if pages is not None else range(len(document))
-        for index in indices:
-            if 0 <= index < len(document):
-                output[index] = extract_page_text(document[index], index)
+        with open_document(path) as document:
+            indices = pages if pages is not None else range(len(document))
+            for index in indices:
+                if 0 <= index < len(document):
+                    output[index] = extract_page_text(document[index], index)
     except pdfium.PdfiumError as exc:
         logger.debug("Could not read text from {}: {}", path, exc)
-    finally:
-        if document is not None:
-            document.close()
     return output

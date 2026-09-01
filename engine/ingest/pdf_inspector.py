@@ -25,6 +25,7 @@ import pypdfium2.raw as pdfium_raw
 from loguru import logger
 
 from engine.utils.longpath import long_path
+from engine.utils.pdf_runtime import open_document
 
 POINTS_PER_MM = 72.0 / 25.4
 
@@ -176,58 +177,64 @@ def _read_container_facts(path: str, info: PdfInfo) -> None:
 
 
 def _read_pages(path: str, info: PdfInfo) -> None:
-    """Page geometry, rotation and content, read with pypdfium2."""
-    document = None
+    """Page geometry, rotation and content, read with pypdfium2.
+
+    The document is opened through `open_document`, which holds the pdfium
+    lock for its whole lifetime. pdfium is not thread-safe, and its failure
+    mode under concurrent use is to report a good drawing as damaged.
+    """
     try:
-        document = pdfium.PdfDocument(long_path(path))
-        info.page_count = len(document)
-
-        for index in range(len(document)):
-            page = document[index]
-            width_pt, height_pt = page.get_size()
-            width_mm = width_pt / POINTS_PER_MM
-            height_mm = height_pt / POINTS_PER_MM
-
-            text_chars = 0
-            try:
-                textpage = page.get_textpage()
-                text_chars = len(textpage.get_text_range().strip())
-            except pdfium.PdfiumError:
-                text_chars = 0
-
-            # Only walk the page objects when there is no text to go on.
-            # A real A1 sheet holds thousands of paths and counting them all
-            # for every file would dominate the deep pass.
-            image_count = 0
-            if text_chars < MIN_TEXT_CHARS:
-                try:
-                    image_count = sum(
-                        1 for obj in page.get_objects() if obj.type == pdfium_raw.FPDF_PAGEOBJ_IMAGE
-                    )
-                except pdfium.PdfiumError:
-                    image_count = 0
-
-            info.pages.append(
-                PageInfo(
-                    index=index,
-                    width_mm=round(width_mm, 1),
-                    height_mm=round(height_mm, 1),
-                    sheet_size=detect_sheet_size(width_mm, height_mm),
-                    rotation=page.get_rotation(),
-                    text_chars=text_chars,
-                    image_count=image_count,
-                    is_landscape=width_mm >= height_mm,
-                )
-            )
+        with open_document(path) as document:
+            _collect_pages(document, info)
     except pdfium.PdfiumError as exc:
         info.is_readable = False
         if info.error_note is None:
             info.error_note = (
                 f"This file could not be read as a PDF. It may be damaged or incomplete. ({exc})"
             )
-    finally:
-        if document is not None:
-            document.close()
+
+
+def _collect_pages(document: pdfium.PdfDocument, info: PdfInfo) -> None:
+    """Walk the pages of an already-open document. The caller holds the lock."""
+    info.page_count = len(document)
+
+    for index in range(len(document)):
+        page = document[index]
+        width_pt, height_pt = page.get_size()
+        width_mm = width_pt / POINTS_PER_MM
+        height_mm = height_pt / POINTS_PER_MM
+
+        text_chars = 0
+        try:
+            textpage = page.get_textpage()
+            text_chars = len(textpage.get_text_range().strip())
+        except pdfium.PdfiumError:
+            text_chars = 0
+
+        # Only walk the page objects when there is no text to go on. A real A1
+        # sheet holds thousands of paths and counting them all for every file
+        # would dominate the deep pass.
+        image_count = 0
+        if text_chars < MIN_TEXT_CHARS:
+            try:
+                image_count = sum(
+                    1 for obj in page.get_objects() if obj.type == pdfium_raw.FPDF_PAGEOBJ_IMAGE
+                )
+            except pdfium.PdfiumError:
+                image_count = 0
+
+        info.pages.append(
+            PageInfo(
+                index=index,
+                width_mm=round(width_mm, 1),
+                height_mm=round(height_mm, 1),
+                sheet_size=detect_sheet_size(width_mm, height_mm),
+                rotation=page.get_rotation(),
+                text_chars=text_chars,
+                image_count=image_count,
+                is_landscape=width_mm >= height_mm,
+            )
+        )
 
 
 def inspect_pdf(path: str | Path, size: int | None = None) -> PdfInfo:

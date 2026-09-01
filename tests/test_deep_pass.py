@@ -400,3 +400,42 @@ def test_jobs_left_running_by_a_crash_are_requeued(project_db):
 
     assert store.reset_stale_running(project_id) == 1
     assert store.counts(project_id)[JobState.QUEUED] == 2
+
+
+# ── Thread safety ──────────────────────────────────────────────────────
+
+
+def test_pdfium_reads_survive_concurrent_threads(tmp_path: Path):
+    """Regression: pdfium is not thread-safe.
+
+    Without a lock, two threads reading different PDFs at once make pdfium
+    report perfectly good drawings as "Data format error" — so the app would
+    quarantine valid drawings as damaged. That is far worse than being slow,
+    because it tells a quantity surveyor a real drawing is corrupt.
+    """
+    from engine.extract.text_extractor import extract_document_text
+    from tests.fixture_builder import build_normal_pair
+
+    old_dir, _ = build_normal_pair(tmp_path / "threads")
+    files = sorted(str(item) for item in old_dir.glob("*.pdf"))
+    assert files
+
+    unreadable: list[str] = []
+    empty_text: list[str] = []
+
+    def worker() -> None:
+        for _ in range(6):
+            for path in files:
+                if not inspect_pdf(path).is_readable:
+                    unreadable.append(path)
+                if not extract_document_text(path):
+                    empty_text.append(path)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+
+    assert unreadable == [], f"{len(unreadable)} good drawings were reported unreadable"
+    assert empty_text == [], f"{len(empty_text)} good drawings returned no text"
