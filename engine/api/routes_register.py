@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from engine.core.enums import IssueType
 from engine.core.models import ReconcileResult
 from engine.core.session import get_session
+from engine.register.list_parser import ParseResult
 from engine.utils.errors import ValidationError
 
 router = APIRouter(prefix="/api", tags=["register"])
@@ -56,10 +57,42 @@ def preview_drawing_list(body: DrawingListRequest) -> dict[str, Any]:
 
     session = get_session()
     result = import_drawing_list(body.path)
+    _reuse_remembered_mapping(session.profile_id, result)
 
     session.list_parse = result
     session.drawing_list_path = body.path
     return result.as_dict()
+
+
+def _reuse_remembered_mapping(profile_id: str, result: ParseResult) -> None:
+    """Apply the mapping this client's register used last time.
+
+    Remembering a mapping is only worth anything if it comes back. The columns
+    are checked against the file first, because a client can change their
+    template, and a stale mapping silently reading the wrong column is exactly
+    the failure this whole flow exists to prevent.
+    """
+    from engine.titleblock.patterns import load_profile
+
+    remembered = load_profile(profile_id).list_column_mapping
+    if not remembered or not result.columns:
+        return
+
+    available = set(result.columns)
+    if not set(remembered.values()) <= available:
+        result.warnings.append(
+            "The column layout remembered for this sheet profile does not match "
+            "this file, so the columns were worked out afresh. Check the preview."
+        )
+        return
+
+    if remembered == result.mapping:
+        return
+
+    result.mapping = dict(remembered)
+    result.warnings.insert(
+        0, "Using the column layout you confirmed for this sheet profile last time."
+    )
 
 
 @router.post("/drawing-list/mapping", summary="Accept or correct the column mapping")

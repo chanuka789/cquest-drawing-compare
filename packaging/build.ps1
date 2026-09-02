@@ -69,10 +69,29 @@ try {
         throw 'npm was not found on PATH. Install Node.js, then reopen PowerShell.'
     }
 
+    # A previously built copy that is still running holds its own DLLs open, and
+    # the failure surfaces as an unhelpful "Access to the path 'ClrLoader.dll' is
+    # denied". Say what is actually wrong instead.
+    $running = Get-Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($DistDir, 'OrdinalIgnoreCase') }
+    if ($running) {
+        Write-Step 'A previously built copy is still running'
+        $running | ForEach-Object { Write-Host "  Closing $($_.ProcessName) (pid $($_.Id))" }
+        $running | Stop-Process -Force
+        Start-Sleep -Seconds 2
+    }
+
     if ($Clean) {
         Write-Step 'Removing previous build output'
         foreach ($dir in @($BuildDir, $DistDir)) {
-            if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+            if (-not (Test-Path $dir)) { continue }
+            try {
+                Remove-Item $dir -Recurse -Force -ErrorAction Stop
+            }
+            catch {
+                throw ("Could not remove $dir because a file in it is in use. " +
+                       'Close the application if it is open, then run this again.')
+            }
         }
     }
 

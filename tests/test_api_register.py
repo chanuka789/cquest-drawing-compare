@@ -463,3 +463,43 @@ def test_the_confirmed_mapping_is_remembered_on_the_profile(client, tmp_path: Pa
     client.post("/api/drawing-list/mapping", json={"mapping": mapping})
 
     assert load_profile("remembered").list_column_mapping == mapping
+
+
+def test_a_remembered_mapping_is_offered_on_the_next_import(client, tmp_path: Path):
+    """Remembering is only worth anything if it comes back."""
+    from tests.fixture_builder import build_messy_drawing_list
+
+    listing = build_messy_drawing_list(tmp_path / "messy.xlsx")
+    client.post("/api/options", json={"profile_id": "reuse-test"})
+    client.post("/api/drawing-list/preview", json={"path": str(listing)})
+    client.post(
+        "/api/drawing-list/mapping",
+        json={"mapping": {"drawing_no": "Dwg No.", "title": "Status", "revision": "Rev."}},
+    )
+
+    # A second import of the same client's register.
+    body = client.post("/api/drawing-list/preview", json={"path": str(listing)}).json()
+
+    assert body["mapping"]["title"] == "Status"  # the choice they made, not the guess
+    assert any("confirmed for this sheet profile" in w for w in body["warnings"])
+
+
+def test_a_stale_mapping_is_not_forced_onto_a_different_file(client, tmp_path: Path):
+    """A client can change their template. Reading the wrong column silently is
+    exactly what this whole confirm-the-preview flow exists to prevent."""
+    from tests.fixture_builder import build_clean_drawing_list, build_messy_drawing_list
+
+    messy = build_messy_drawing_list(tmp_path / "messy.xlsx")
+    client.post("/api/options", json={"profile_id": "stale-test"})
+    client.post("/api/drawing-list/preview", json={"path": str(messy)})
+    client.post(
+        "/api/drawing-list/mapping",
+        json={"mapping": {"drawing_no": "Dwg No.", "title": "Sheet Name"}},
+    )
+
+    # A different layout: "Drawing No" / "Title", not "Dwg No." / "Sheet Name".
+    clean = build_clean_drawing_list(tmp_path / "clean.xlsx")
+    body = client.post("/api/drawing-list/preview", json={"path": str(clean)}).json()
+
+    assert body["mapping"]["drawing_no"] == "Drawing No"
+    assert any("does not match this file" in w for w in body["warnings"])
