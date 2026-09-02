@@ -16,7 +16,7 @@ import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from engine.core.events import POLL_INTERVAL_SECONDS, progress_bus
+from engine.core.events import POLL_INTERVAL_SECONDS, progress_bus, shutdown_requested
 
 router = APIRouter()
 
@@ -29,10 +29,14 @@ async def progress_socket(websocket: WebSocket) -> None:
 
     try:
         with progress_bus.subscribe() as subscriber:
-            while True:
+            # Not `while True`: the engine must be able to shut down promptly
+            # when the user closes the window.
+            while not shutdown_requested.is_set():
                 for event in subscriber.drain():
                     await websocket.send_json(event.as_dict())
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+            await websocket.close()
     except WebSocketDisconnect:
         logger.debug("Progress socket disconnected")
     except (asyncio.CancelledError, RuntimeError):

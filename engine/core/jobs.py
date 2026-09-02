@@ -90,7 +90,7 @@ def inspect_file_task(path: str, size: int) -> dict[str, Any]:
 
     try:
         return inspect_pdf(path, size=size).as_dict()
-    except Exception as exc:
+    except Exception:
         return {
             "path": path,
             "size": size,
@@ -101,7 +101,9 @@ def inspect_file_task(path: str, size: int) -> dict[str, Any]:
             "layer_names": [],
             "producer": None,
             "is_readable": False,
-            "error_note": f"This file could not be read. ({exc})",
+            "error_note": (
+                "This file could not be read. Check it opens in a PDF viewer, then scan again."
+            ),
         }
 
 
@@ -207,7 +209,10 @@ def run_batch(
                         result = {
                             "path": path,
                             "is_readable": False,
-                            "error_note": f"This file could not be read. ({exc})",
+                            "error_note": (
+                                "This file could not be read. Check it opens in a PDF viewer, "
+                                "then scan again."
+                            ),
                             "pages": [],
                             "page_count": 0,
                             "size": 0,

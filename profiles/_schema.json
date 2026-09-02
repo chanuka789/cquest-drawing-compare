@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cquest.local/schemas/sheet-profile.json",
+  "title": "Sheet profile",
+  "description": "One client's drawing conventions: how their drawing numbers, revisions, titles and scales are written, and how their drawing list is laid out.",
+  "type": "object",
+  "required": ["id", "label"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "File-name-safe identifier. Must match the file name.",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "label": {
+      "type": "string",
+      "description": "Name shown in the Setup screen dropdown. Sentence case."
+    },
+    "number_patterns": {
+      "type": "array",
+      "description": "Regular expressions matching a drawing number, most specific first.",
+      "items": { "type": "string" }
+    },
+    "number_labels": {
+      "type": "array",
+      "description": "Lower-case title block labels that sit next to the drawing number.",
+      "items": { "type": "string" }
+    },
+    "revision_patterns": {
+      "type": "array",
+      "description": "Regular expressions matching a revision code. Capture group 1 is the code.",
+      "items": { "type": "string" }
+    },
+    "revision_labels": { "type": "array", "items": { "type": "string" } },
+    "title_labels": { "type": "array", "items": { "type": "string" } },
+    "scale_labels": { "type": "array", "items": { "type": "string" } },
+    "revision_scheme": {
+      "type": "string",
+      "description": "The client's revision scheme, when known in advance.",
+      "enum": ["alpha", "preliminary", "construction", "tender", "numeric", "unknown"]
+    },
+    "list_column_mapping": {
+      "type": "object",
+      "description": "Remembered column mapping for this client's drawing list, so the user confirms it once rather than every time.",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

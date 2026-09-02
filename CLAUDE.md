@@ -74,6 +74,45 @@ Ruff `target-version` stays at `py313` so the code remains 3.13-compatible.
 
 ## Current phase
 
-Phase 1 — Skeleton. Building the shell, database, and Setup screen only.
-No PDF processing, no comparison logic yet. Do not add features from
-later phases even if they seem easy.
+Phase 2 — Intake & register. Scanning folders, identifying drawings,
+reconciling the two sets, exporting the register.
+No image rendering, no alignment, no comparison. Those are Phase 4+.
+
+## Phase 2 rules
+
+- Scanning must show results progressively. Never block the UI while
+  reading a network folder.
+- Every scan result is cached by (path, size, mtime). Re-scanning an
+  unchanged folder must be near-instant.
+- Every drawing number records HOW it was found (title block, filename,
+  drawing list, or user). The user must be able to see and trust this.
+- A missing drawing in a partial issue is NOT a deleted drawing.
+  Never use the word "removed" until the issue type is known.
+- The app never writes into the user's input folders. All output goes
+  to the output folder the user chose.
+
+## Known real-world facts (learned the hard way, keep in mind)
+
+- **A PDF page box is NOT always at the origin.** The Lami Architects
+  fixture has a mediabox of (-1192, -842, 1192, 842). Always compute
+  zones from `page.get_mediabox()`, never from `(0, 0, width, height)`.
+- **Title block values sit BELOW their label as often as to the right.**
+  `Drawing No.` -> value below; `Scale` -> value to the right. Weight the
+  off-axis offset when matching, or the neighbouring cell wins on a tie
+  and every sheet reads as the project number.
+- **Label order is priority order.** "drawing title" must beat
+  "description", or a materials legend headed DESCRIPTION is mistaken
+  for the title block.
+- **pdfium is NOT thread-safe.** Under concurrent use it reports good
+  PDFs as `Data format error`, so valid drawings get quarantined as
+  damaged. Every document goes through
+  `engine/utils/pdf_runtime.open_document`. Parallelism comes from the
+  process pool, where each worker has its own pdfium.
+- **PyInstaller + multiprocessing needs `freeze_support()` first thing
+  in `main()`**, or every pool worker opens its own application window.
+- **Uvicorn waits for open connections before running lifespan
+  shutdown.** Long-lived readers must watch
+  `engine.core.events.shutdown_requested`, which `EngineServer.stop()`
+  raises *before* setting `should_exit`.
+- **Register literal API routes before parameterised ones.**
+  `/api/scan/{side}` declared first swallows `/api/scan/cancel`.

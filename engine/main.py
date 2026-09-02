@@ -35,6 +35,7 @@ import webview
 from loguru import logger
 
 from engine.api.app import create_app
+from engine.core.events import shutdown_requested
 from engine.settings import get_settings
 from engine.storage.paths import get_app_paths
 from engine.utils.logging_setup import setup_logging
@@ -124,6 +125,12 @@ class EngineServer:
         if not self._thread.is_alive():
             return
         logger.info("Stopping engine thread")
+
+        # Raise this BEFORE asking Uvicorn to exit. Uvicorn waits for open
+        # connections to close before it runs lifespan shutdown, so a flag set
+        # from the lifespan would arrive too late: the progress WebSocket would
+        # be waiting for the flag while Uvicorn waited for the WebSocket.
+        shutdown_requested.set()
         self._server.should_exit = True
         self._thread.join(timeout=timeout)
         if self._thread.is_alive():

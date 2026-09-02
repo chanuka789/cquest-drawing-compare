@@ -1,5 +1,6 @@
 /**
- * Application-level state: is the engine reachable, and what is it.
+ * Application-level state: which screen is showing, and whether the engine
+ * is reachable.
  *
  * Screen state lives in its own store. This one holds only what every screen
  * needs to know.
@@ -12,6 +13,7 @@ import type { HealthResponse } from '../api/types';
 import { isDesktop } from '../lib/native';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'ready' | 'error';
+export type ScreenName = 'setup' | 'register';
 
 interface AppState {
   status: ConnectionStatus;
@@ -19,7 +21,11 @@ interface AppState {
   errorMessage: string | null;
   /** True inside the desktop shell, false in a plain browser tab. */
   desktop: boolean;
+  screen: ScreenName;
+
   connect: () => Promise<void>;
+  goToRegister: () => void;
+  goToSetup: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -27,6 +33,7 @@ export const useAppStore = create<AppState>((set) => ({
   health: null,
   errorMessage: null,
   desktop: false,
+  screen: 'setup',
 
   connect: async () => {
     set({ status: 'connecting', errorMessage: null });
@@ -41,4 +48,7 @@ export const useAppStore = create<AppState>((set) => ({
       set({ status: 'error', health: null, errorMessage: message, desktop: isDesktop() });
     }
   },
+
+  goToRegister: () => set({ screen: 'register' }),
+  goToSetup: () => set({ screen: 'setup' }),
 }));

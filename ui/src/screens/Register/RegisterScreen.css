@@ -1,0 +1,448 @@
+/* Screen 2 — the drawing register. Every colour comes from tokens.css.
+   The status palette is used for data; brand red stays in the chrome. */
+
+.register {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  gap: var(--space-4);
+}
+
+/* ── Heading ─────────────────────────────────────────────────────────── */
+
+.register__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.register__back {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+}
+
+.register__back:hover {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.register__sentence {
+  margin-top: var(--space-2);
+  color: var(--text-mid);
+  max-width: 100ch;
+}
+
+/* ── Summary bar ─────────────────────────────────────────────────────── */
+
+.register__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  padding: 0;
+  border-radius: var(--radius-pill);
+  opacity: 0.78;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.chip:hover {
+  opacity: 1;
+}
+
+.chip--on {
+  opacity: 1;
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ── Tools ───────────────────────────────────────────────────────────── */
+
+.register__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.register__search {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+  color: var(--text-hi);
+}
+
+.register__search:hover {
+  border-color: var(--room-200);
+}
+
+.register__count {
+  flex: 0 0 auto;
+  color: var(--text-low);
+}
+
+.register__export {
+  flex: 0 0 auto;
+}
+
+.register__notice,
+.register__error {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+
+.register__error {
+  border-left: 2px solid var(--danger);
+  color: var(--text-hi);
+}
+
+/* ── The table ───────────────────────────────────────────────────────── */
+
+.register__body {
+  flex: 1 1 auto;
+  display: flex;
+  gap: var(--space-4);
+  min-height: 0;
+}
+
+.register__table {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-lg);
+  background: var(--room-700);
+  overflow: hidden;
+}
+
+.register__thead,
+.register__row {
+  display: grid;
+  grid-template-columns:
+    9rem minmax(0, 1.4fr) 4.5rem 2px 4.5rem 13rem minmax(0, 1.6fr);
+  gap: var(--space-3);
+  align-items: center;
+  padding: 0 var(--space-4);
+}
+
+.register__thead {
+  height: 34px;
+  border-bottom: 1px solid var(--room-300);
+  background: var(--room-500);
+  color: var(--text-low);
+  letter-spacing: 0.04em;
+}
+
+.register__thead button {
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.register__thead button:hover {
+  color: var(--text-hi);
+}
+
+/* The seam, carried through from the Setup screen: the comparison axis. */
+.register__seam-cell {
+  width: 2px;
+  height: 100%;
+  background: var(--brand);
+  box-shadow: 0 0 10px var(--brand-glow);
+}
+
+.register__scroll {
+  position: relative;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.register__canvas {
+  position: relative;
+  width: 100%;
+}
+
+.register__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  border-bottom: 1px solid rgba(58, 68, 79, 0.4);
+  color: var(--text-mid);
+  font-size: var(--text-body);
+  text-align: left;
+}
+
+.register__row:hover {
+  background: var(--room-500);
+}
+
+.register__row--attention {
+  background: rgba(227, 154, 0, 0.07);
+}
+
+.register__row--selected {
+  background: var(--room-500);
+  outline: 1px solid var(--brand);
+  outline-offset: -1px;
+}
+
+.register__no {
+  color: var(--text-hi);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.register__title,
+.register__note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.register__note {
+  font-size: var(--text-micro);
+  color: var(--text-low);
+}
+
+.register__cell--centre {
+  text-align: center;
+}
+
+.register__status {
+  overflow: hidden;
+}
+
+.register__empty {
+  padding: var(--space-7) var(--space-4);
+  text-align: center;
+  color: var(--text-low);
+}
+
+/* ── The detail panel ────────────────────────────────────────────────── */
+
+.detail {
+  flex: 0 0 340px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-lg);
+  background: var(--room-700);
+  overflow-y: auto;
+}
+
+.detail__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.detail__title {
+  font-size: var(--text-section);
+  font-variant-numeric: tabular-nums;
+}
+
+.detail__subtitle {
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+}
+
+.detail__close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  color: var(--text-mid);
+  font-size: var(--text-section);
+  line-height: 1;
+}
+
+.detail__close:hover {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.detail__note {
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+}
+
+.detail__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--room-300);
+  border-bottom: 1px solid var(--room-300);
+  font-size: var(--text-micro);
+}
+
+.detail__facts dt {
+  color: var(--text-low);
+}
+
+.detail__facts dd {
+  margin: 0;
+  color: var(--text-hi);
+}
+
+.detail__warning {
+  color: var(--warn);
+  font-size: var(--text-micro);
+}
+
+.detail__paths {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail__path-label {
+  color: var(--text-low);
+}
+
+.detail__path {
+  margin-bottom: var(--space-2);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+
+.detail__correct {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--room-300);
+}
+
+.detail__apply {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  cursor: pointer;
+}
+
+.detail__save {
+  align-self: flex-start;
+}
+
+/* ── The issue type question ─────────────────────────────────────────── */
+
+.issue-type {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+
+.issue-type__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+  width: 100%;
+  max-width: 620px;
+  padding: var(--space-6);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-lg);
+  background: var(--room-700);
+  box-shadow: var(--shadow-overlay);
+}
+
+.issue-type__title {
+  font-size: var(--text-screen-title);
+}
+
+.issue-type__question {
+  color: var(--text-mid);
+}
+
+.issue-type__counts {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-6);
+  align-self: center;
+  padding: var(--space-4) 0;
+}
+
+.issue-type__counts > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-low);
+}
+
+.issue-type__count {
+  font-size: 32px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-hi);
+}
+
+.issue-type__seam {
+  width: 2px;
+  background: var(--brand);
+  box-shadow: 0 0 16px var(--brand-glow);
+}
+
+.issue-type__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  list-style: none;
+  padding: 0;
+}
+
+.issue-type__option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-500);
+  text-align: left;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.issue-type__option:hover {
+  border-color: var(--brand);
+}
+
+.issue-type__option-label {
+  font-weight: var(--weight-medium);
+  color: var(--text-hi);
+}
+
+.issue-type__option-note {
+  font-size: var(--text-micro);
+  color: var(--text-mid);
+}

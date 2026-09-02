@@ -1,0 +1,71 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+}
+
+.rail__track {
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--room-300);
+  overflow: hidden;
+}
+
+.rail__fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: var(--radius-pill);
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.rail--failed .rail__fill {
+  background: var(--warn);
+}
+
+.rail__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-micro);
+  color: var(--text-mid);
+}
+
+.rail__count {
+  flex: 0 0 auto;
+  color: var(--text-hi);
+}
+
+.rail__item {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail--failed .rail__item {
+  color: var(--warn);
+}
+
+.rail__eta {
+  flex: 0 0 auto;
+  color: var(--text-low);
+}
+
+.rail__cancel {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+}
+
+.rail__cancel:hover {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}

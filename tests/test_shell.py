@@ -7,6 +7,7 @@ they are covered here rather than left to manual testing.
 from __future__ import annotations
 
 import socket
+import time
 
 import httpx
 import pytest
@@ -109,3 +110,28 @@ def test_dialogs_return_none_when_there_is_no_window():
     api = JsApi(1234)
     assert api.pick_folder("Choose a folder") is None
     assert api.pick_file("Choose a file", ["All files (*.*)"]) is None
+
+
+def test_the_engine_stops_promptly_with_a_progress_socket_open():
+    """Regression: closing the window took the full shutdown timeout.
+
+    The progress WebSocket looped forever, so Uvicorn's graceful shutdown
+    waited it out and the process only exited via `force_exit`. A user closing
+    the window should not sit watching it for five seconds.
+    """
+    from fastapi.testclient import TestClient
+
+    from engine.api.app import create_app
+
+    port = find_free_port()
+    server = EngineServer(port)
+    server.start()
+    server.wait_until_ready(timeout=15)
+
+    # Hold a progress socket open, exactly as the UI does.
+    with TestClient(create_app()) as client, client.websocket_connect("/api/ws/progress"):
+        started = time.perf_counter()
+        server.stop(timeout=10)
+        elapsed = time.perf_counter() - started
+
+    assert elapsed < 4.0, f"shutdown took {elapsed:.1f}s with a socket open"

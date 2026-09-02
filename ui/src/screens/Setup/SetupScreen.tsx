@@ -1,9 +1,14 @@
-import { baseName } from '../../lib/path';
+import { useEffect } from 'react';
+
+import { ProgressRail } from '../../components/ProgressRail';
+import { useProgress } from '../../hooks/useProgress';
+import { baseName, truncateMiddle } from '../../lib/path';
+import { useAppStore } from '../../store/appStore';
 import {
-  SHEET_PROFILES,
   TOLERANCES,
   canBuildRegister,
   useSetupStore,
+  visibleSheets,
 } from '../../store/setupStore';
 import { IssuePanel } from './IssuePanel';
 import { Seam } from './Seam';
@@ -14,16 +19,40 @@ const DROP_NOT_SUPPORTED =
   'Windows cannot pass a folder path by dragging. Click the panel to browse for it.';
 
 /**
- * Screen 1 — the two folder pickers.
+ * Screen 1 — the three folder pickers.
  *
  * The first screen a user sees every time, so it carries the visual identity:
- * two panels either side of the seam.
+ * two issue panels either side of the seam, with the output folder below.
  */
 export function SetupScreen() {
   const state = useSetupStore();
+  const goToRegister = useAppStore((store) => store.goToRegister);
   const ready = canBuildRegister(state);
 
+  // The scan streams progress; refresh the panels whenever a stage ends.
+  const { event } = useProgress((incoming) => {
+    if (incoming.kind === 'finished' || incoming.kind === 'cancelled') {
+      void state.refreshAll();
+    }
+  });
+
+  useEffect(() => {
+    void state.init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Safety net. The socket is the fast path, but a dropped frame must never
+  // leave the panels stuck reporting "reading…" for a scan that has finished.
+  const scanning = state.old.is_scanning || state.new.is_scanning;
+  useEffect(() => {
+    if (!scanning) return;
+    const timer = window.setInterval(() => void state.refreshAll(), 1500);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanning]);
+
   const tolerance = TOLERANCES.find((option) => option.id === state.toleranceId);
+  const validation = state.outputValidation;
 
   return (
     <div className="setup">
@@ -38,9 +67,14 @@ export function SetupScreen() {
         <div className="setup__panels">
           <IssuePanel
             label="Previous issue"
-            hint="Drop a folder here or browse"
-            folder={state.previousFolder}
-            onChoose={() => void state.chooseFolder('previous')}
+            side="old"
+            state={state.old}
+            rows={visibleSheets(state, 'old')}
+            expanded={state.expanded.old}
+            filter={state.filter.old}
+            onChoose={() => void state.chooseFolder('old')}
+            onToggle={() => state.toggleExpanded('old')}
+            onFilterChange={(text) => state.setFilter('old', text)}
             onDropUnsupported={() => state.setNotice(DROP_NOT_SUPPORTED)}
           />
 
@@ -48,12 +82,19 @@ export function SetupScreen() {
 
           <IssuePanel
             label="Current issue"
-            hint="Drop a folder here or browse"
-            folder={state.currentFolder}
-            onChoose={() => void state.chooseFolder('current')}
+            side="new"
+            state={state.new}
+            rows={visibleSheets(state, 'new')}
+            expanded={state.expanded.new}
+            filter={state.filter.new}
+            onChoose={() => void state.chooseFolder('new')}
+            onToggle={() => state.toggleExpanded('new')}
+            onFilterChange={(text) => state.setFilter('new', text)}
             onDropUnsupported={() => state.setNotice(DROP_NOT_SUPPORTED)}
           />
         </div>
+
+        <ProgressRail event={event} onCancel={() => void state.cancel()} />
 
         {state.notice && (
           <p className="setup__notice" role="status">
@@ -61,23 +102,57 @@ export function SetupScreen() {
           </p>
         )}
 
-        <div className="setup__list">
+        {/* ── Output folder ── */}
+        <div className="setup__row">
           <button
             type="button"
-            className="setup__list-button"
+            className="setup__row-button"
+            onClick={() => void state.chooseOutput()}
+          >
+            <span className="setup__row-label">Output folder</span>
+            <span
+              className="setup__row-value tabular"
+              title={state.outputFolder ?? state.outputSuggestion ?? undefined}
+            >
+              {state.outputFolder
+                ? truncateMiddle(state.outputFolder, 54)
+                : (state.outputSuggestion
+                    ? `Suggested: ${baseName(state.outputSuggestion)}`
+                    : 'Choose a folder')}
+            </span>
+          </button>
+        </div>
+
+        {validation && !validation.is_valid && (
+          <p className="setup__error" role="alert">
+            {validation.errors[0]}
+          </p>
+        )}
+        {validation?.is_valid &&
+          validation.warnings.map((warning) => (
+            <p key={warning} className="setup__warning micro">
+              {warning}
+            </p>
+          ))}
+
+        {/* ── Drawing list ── */}
+        <div className="setup__row">
+          <button
+            type="button"
+            className="setup__row-button"
             onClick={() => void state.chooseDrawingList()}
           >
-            <span className="setup__list-label">Drawing list (optional)</span>
-            <span className="setup__list-value tabular" title={state.drawingList ?? undefined}>
-              {state.drawingList ? baseName(state.drawingList) : 'Choose a file'}
+            <span className="setup__row-label">Drawing list (optional)</span>
+            <span className="setup__row-value tabular" title={state.drawingListPath ?? undefined}>
+              {state.drawingListPath ? baseName(state.drawingListPath) : 'Choose a file'}
             </span>
           </button>
 
-          {state.drawingList && (
+          {state.drawingListPath && (
             <button
               type="button"
-              className="setup__list-clear"
-              onClick={() => state.clearDrawingList()}
+              className="setup__row-clear"
+              onClick={() => void state.removeDrawingList()}
               aria-label="Remove the drawing list"
               title="Remove the drawing list"
             >
@@ -86,15 +161,31 @@ export function SetupScreen() {
           )}
         </div>
 
+        {state.listParse && (
+          <div className="setup__list-note">
+            <p className="micro">
+              {state.listParse.row_count} drawings read from{' '}
+              {state.listParse.sheet_name ?? 'the file'}
+              {state.listParse.header_row ? `, header on row ${state.listParse.header_row}` : ''}.
+            </p>
+            {state.listParse.warnings.map((warning) => (
+              <p key={warning} className="setup__warning micro">
+                {warning}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {/* ── Options ── */}
         <div className="setup__options">
           <label className="field">
             <span className="field__label">Sheet profile</span>
             <select
               className="field__control"
               value={state.profileId}
-              onChange={(event) => state.setProfile(event.target.value)}
+              onChange={(event) => void state.setProfile(event.target.value)}
             >
-              {SHEET_PROFILES.map((profile) => (
+              {state.profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.label}
                 </option>
@@ -107,7 +198,7 @@ export function SetupScreen() {
             <select
               className="field__control tabular"
               value={state.toleranceId}
-              onChange={(event) => state.setTolerance(event.target.value)}
+              onChange={(event) => void state.setTolerance(event.target.value)}
             >
               {TOLERANCES.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -118,8 +209,8 @@ export function SetupScreen() {
           </label>
 
           <p className="setup__options-note micro">
-            Tolerance is measured on the drawing, at {tolerance?.millimetres ?? 25} mm at
-            true scale.
+            Tolerance is measured on the drawing, at {tolerance?.millimetres ?? 25} mm at true
+            scale.
           </p>
         </div>
 
@@ -128,18 +219,8 @@ export function SetupScreen() {
             type="button"
             className="button button--primary"
             disabled={!ready}
-            title={ready ? undefined : 'Choose a folder for both issues first'}
-            onClick={() => {
-              // Phase 2 builds the register. Phase 1 stops here on purpose.
-              // eslint-disable-next-line no-console
-              console.info('Build the register', {
-                previous: state.previousFolder,
-                current: state.currentFolder,
-                drawingList: state.drawingList,
-                profile: state.profileId,
-                toleranceMm: tolerance?.millimetres,
-              });
-            }}
+            title={ready ? undefined : 'Choose a folder for both issues and let the scan finish'}
+            onClick={() => goToRegister()}
           >
             Build the register →
           </button>

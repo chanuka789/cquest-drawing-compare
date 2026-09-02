@@ -1,97 +1,152 @@
 /**
- * State for the Setup screen: the two issue folders, the optional drawing
- * list, and the run options.
+ * State for the Setup screen: the three folders, the drawing list, and the
+ * run options.
  *
- * Phase 1 stops here. Building the register is Phase 2.
+ * The fast pass runs the moment a folder is chosen, so rows appear at once;
+ * the deep pass then starts in the background and the rows fill in.
  */
 
 import { create } from 'zustand';
 
+import {
+  ApiError,
+  cancelScan,
+  clearDrawingList,
+  fetchOutputSuggestion,
+  fetchProfiles,
+  fetchSheets,
+  fetchSides,
+  previewDrawingList,
+  setFolder as apiSetFolder,
+  setOptions,
+  setOutput,
+  startScan,
+  validateOutput,
+} from '../api/client';
+import type {
+  IssueSide,
+  ListParseResult,
+  OutputValidation,
+  SheetProfileOption,
+  SheetRow,
+  SideState,
+} from '../api/types';
 import { NO_BRIDGE_MESSAGE, isDesktop, pickFile, pickFolder } from '../lib/native';
-import { isSameFolder } from '../lib/path';
-import type { SheetProfileOption, ToleranceOption } from '../api/types';
-
-export type IssueSide = 'previous' | 'current';
-
-/** Phase 2 loads these from `profiles/`. Hard-coded until then. */
-export const SHEET_PROFILES: SheetProfileOption[] = [
-  { id: 'default', label: 'Default' },
-  { id: 'keo-a1', label: 'KEO A1' },
-];
 
 /** Tolerance is always in millimetres at drawing scale, never in pixels. */
-export const TOLERANCES: ToleranceOption[] = [
+export const TOLERANCES = [
   { id: 'tight', label: '10 mm', millimetres: 10 },
   { id: 'standard', label: '25 mm', millimetres: 25 },
   { id: 'loose', label: '50 mm', millimetres: 50 },
-];
+] as const;
 
-const DRAWING_LIST_TYPES = [
-  'Drawing list (*.xlsx;*.xls;*.csv;*.pdf;*.docx)',
-  'All files (*.*)',
-];
+const DRAWING_LIST_TYPES = ['Drawing list (*.xlsx;*.xls;*.csv;*.pdf)', 'All files (*.*)'];
+
+const DIALOG_TITLES: Record<IssueSide, string> = {
+  old: 'Choose the folder for the previous issue',
+  new: 'Choose the folder for the current issue',
+};
+
+const EMPTY_SIDE: SideState = {
+  side: 'old',
+  folder: null,
+  headline: 'Not scanned yet',
+  file_count: 0,
+  sheet_count: 0,
+  identified_count: 0,
+  attention_count: 0,
+  is_scanning: false,
+  error: null,
+  other_files: {},
+  skipped_count: 0,
+};
 
 interface SetupState {
-  previousFolder: string | null;
-  currentFolder: string | null;
-  drawingList: string | null;
+  old: SideState;
+  new: SideState;
+  sheets: Record<IssueSide, SheetRow[]>;
+  expanded: Record<IssueSide, boolean>;
+  filter: Record<IssueSide, string>;
+
+  outputFolder: string | null;
+  outputSuggestion: string | null;
+  outputValidation: OutputValidation | null;
+
+  drawingListPath: string | null;
+  listParse: ListParseResult | null;
+
+  profiles: SheetProfileOption[];
   profileId: string;
   toleranceId: string;
-  /** Shown under the panels. Always phrased as what to do next. */
+
   notice: string | null;
-  /** Increments each time both folders are complete, to fire the seam pulse. */
+  busy: boolean;
+  /** Increments when both folders are complete, to fire the seam pulse. */
   pulseToken: number;
 
+  init: () => Promise<void>;
   chooseFolder: (side: IssueSide) => Promise<void>;
-  setFolder: (side: IssueSide, path: string) => void;
+  refreshSide: (side: IssueSide) => Promise<void>;
+  refreshSheets: (side: IssueSide) => Promise<void>;
+  refreshAll: () => Promise<void>;
+  cancel: () => Promise<void>;
+  toggleExpanded: (side: IssueSide) => void;
+  setFilter: (side: IssueSide, text: string) => void;
+
+  chooseOutput: () => Promise<void>;
+  acceptSuggestedOutput: () => Promise<void>;
+
   chooseDrawingList: () => Promise<void>;
-  clearDrawingList: () => void;
-  setProfile: (id: string) => void;
-  setTolerance: (id: string) => void;
+  removeDrawingList: () => Promise<void>;
+
+  setProfile: (id: string) => Promise<void>;
+  setTolerance: (id: string) => Promise<void>;
   setNotice: (message: string | null) => void;
 }
 
-const DIALOG_TITLES: Record<IssueSide, string> = {
-  previous: 'Choose the folder for the previous issue',
-  current: 'Choose the folder for the current issue',
-};
+function message(error: unknown): string {
+  return error instanceof ApiError
+    ? error.message
+    : 'Something went wrong. The details are in the log file.';
+}
 
 export const useSetupStore = create<SetupState>((set, get) => ({
-  previousFolder: null,
-  currentFolder: null,
-  drawingList: null,
+  old: { ...EMPTY_SIDE, side: 'old' },
+  new: { ...EMPTY_SIDE, side: 'new' },
+  sheets: { old: [], new: [] },
+  expanded: { old: false, new: false },
+  filter: { old: '', new: '' },
+
+  outputFolder: null,
+  outputSuggestion: null,
+  outputValidation: null,
+
+  drawingListPath: null,
+  listParse: null,
+
+  profiles: [{ id: 'default', label: 'Default' }],
   profileId: 'default',
   toleranceId: 'standard',
+
   notice: null,
+  busy: false,
   pulseToken: 0,
 
-  setFolder: (side, path) => {
-    const state = get();
-    const other = side === 'previous' ? state.currentFolder : state.previousFolder;
-
-    if (isSameFolder(path, other)) {
+  init: async () => {
+    try {
+      const [profiles, sides] = await Promise.all([fetchProfiles(), fetchSides()]);
+      const byside = Object.fromEntries(sides.map((item) => [item.side, item])) as Record<
+        IssueSide,
+        SideState
+      >;
       set({
-        notice:
-          'Both issues point at the same folder. Choose a different folder for one of them.',
+        profiles,
+        old: byside.old ?? get().old,
+        new: byside.new ?? get().new,
       });
-      return;
+    } catch {
+      // The engine may still be starting. The health check reports that.
     }
-
-    const next =
-      side === 'previous' ? { previousFolder: path } : { currentFolder: path };
-    const bothChosenBefore = Boolean(state.previousFolder && state.currentFolder);
-    const bothChosenNow = Boolean(
-      (side === 'previous' ? path : state.previousFolder) &&
-        (side === 'current' ? path : state.currentFolder),
-    );
-
-    set({
-      ...next,
-      notice: null,
-      // The seam pulses only on the move from one folder to two.
-      pulseToken:
-        bothChosenNow && !bothChosenBefore ? state.pulseToken + 1 : state.pulseToken,
-    });
   },
 
   chooseFolder: async (side) => {
@@ -99,26 +154,202 @@ export const useSetupStore = create<SetupState>((set, get) => ({
       set({ notice: NO_BRIDGE_MESSAGE });
       return;
     }
+
     const chosen = await pickFolder(DIALOG_TITLES[side]);
-    if (chosen) get().setFolder(side, chosen);
+    if (!chosen) return;
+
+    set({ busy: true, notice: null });
+    try {
+      const state = await apiSetFolder(side, chosen);
+      const before = get();
+      const bothBefore = Boolean(before.old.folder && before.new.folder);
+      const bothNow = Boolean(
+        (side === 'old' ? chosen : before.old.folder) &&
+          (side === 'new' ? chosen : before.new.folder),
+      );
+
+      set({
+        [side]: state,
+        expanded: { ...before.expanded, [side]: true },
+        // The seam pulses only on the move from one folder to two.
+        pulseToken: bothNow && !bothBefore ? before.pulseToken + 1 : before.pulseToken,
+      } as Partial<SetupState>);
+
+      await get().refreshSheets(side);
+      await startScan(side);
+      void get().refreshAll();
+
+      if (bothNow) void get().acceptSuggestedOutput();
+    } catch (error) {
+      set({ notice: message(error) });
+    } finally {
+      set({ busy: false });
+    }
   },
+
+  refreshSide: async (side) => {
+    try {
+      const sides = await fetchSides();
+      const found = sides.find((item) => item.side === side);
+      if (found) set({ [side]: found } as Partial<SetupState>);
+    } catch {
+      /* transient; the next tick will pick it up */
+    }
+  },
+
+  refreshSheets: async (side) => {
+    try {
+      const rows = await fetchSheets(side);
+      set({ sheets: { ...get().sheets, [side]: rows } });
+    } catch {
+      /* transient */
+    }
+  },
+
+  refreshAll: async () => {
+    await Promise.all([
+      get().refreshSide('old'),
+      get().refreshSide('new'),
+      get().refreshSheets('old'),
+      get().refreshSheets('new'),
+    ]);
+  },
+
+  cancel: async () => {
+    try {
+      await cancelScan();
+      set({ notice: 'Scan stopped. The drawings already read are kept.' });
+    } catch (error) {
+      set({ notice: message(error) });
+    }
+  },
+
+  toggleExpanded: (side) =>
+    set({ expanded: { ...get().expanded, [side]: !get().expanded[side] } }),
+
+  setFilter: (side, text) => set({ filter: { ...get().filter, [side]: text } }),
+
+  // ── Output folder ────────────────────────────────────────────────────
+
+  acceptSuggestedOutput: async () => {
+    try {
+      const { folder } = await fetchOutputSuggestion();
+      if (!folder) return;
+      set({ outputSuggestion: folder });
+
+      if (!get().outputFolder) {
+        const validation = await validateOutput(folder);
+        set({ outputValidation: validation });
+        if (validation.is_valid) {
+          await setOutput(folder);
+          set({ outputFolder: folder });
+        }
+      }
+    } catch (error) {
+      set({ notice: message(error) });
+    }
+  },
+
+  chooseOutput: async () => {
+    if (!isDesktop()) {
+      set({ notice: NO_BRIDGE_MESSAGE });
+      return;
+    }
+
+    const chosen = await pickFolder('Choose where to save the results');
+    if (!chosen) return;
+
+    try {
+      const validation = await validateOutput(chosen);
+      set({ outputValidation: validation });
+
+      if (!validation.is_valid) {
+        set({ outputFolder: null, notice: validation.errors[0] ?? null });
+        return;
+      }
+
+      await setOutput(chosen);
+      set({ outputFolder: chosen, notice: null });
+    } catch (error) {
+      set({ notice: message(error) });
+    }
+  },
+
+  // ── The drawing list ─────────────────────────────────────────────────
 
   chooseDrawingList: async () => {
     if (!isDesktop()) {
       set({ notice: NO_BRIDGE_MESSAGE });
       return;
     }
+
     const chosen = await pickFile('Choose the issued drawing list', DRAWING_LIST_TYPES);
-    if (chosen) set({ drawingList: chosen, notice: null });
+    if (!chosen) return;
+
+    set({ busy: true });
+    try {
+      const parse = await previewDrawingList(chosen);
+      set({ drawingListPath: chosen, listParse: parse, notice: null });
+    } catch (error) {
+      set({ notice: message(error) });
+    } finally {
+      set({ busy: false });
+    }
   },
 
-  clearDrawingList: () => set({ drawingList: null }),
-  setProfile: (id) => set({ profileId: id }),
-  setTolerance: (id) => set({ toleranceId: id }),
-  setNotice: (message) => set({ notice: message }),
+  removeDrawingList: async () => {
+    try {
+      await clearDrawingList();
+    } catch {
+      /* clearing is best-effort */
+    }
+    set({ drawingListPath: null, listParse: null });
+  },
+
+  // ── Options ──────────────────────────────────────────────────────────
+
+  setProfile: async (id) => {
+    set({ profileId: id });
+    try {
+      await setOptions({ profile_id: id });
+    } catch (error) {
+      set({ notice: message(error) });
+    }
+  },
+
+  setTolerance: async (id) => {
+    const option = TOLERANCES.find((item) => item.id === id);
+    set({ toleranceId: id });
+    if (!option) return;
+    try {
+      await setOptions({ tolerance_mm: option.millimetres });
+    } catch (error) {
+      set({ notice: message(error) });
+    }
+  },
+
+  setNotice: (notice) => set({ notice }),
 }));
 
-/** Both folders chosen: the register can be built. */
+/** Both folders chosen and the scans finished: the register can be built. */
 export function canBuildRegister(state: SetupState): boolean {
-  return Boolean(state.previousFolder && state.currentFolder);
+  return (
+    Boolean(state.old.folder && state.new.folder) &&
+    !state.old.is_scanning &&
+    !state.new.is_scanning &&
+    state.old.sheet_count + state.new.sheet_count > 0
+  );
+}
+
+/** Rows for one panel, after the filter box. */
+export function visibleSheets(state: SetupState, side: IssueSide): SheetRow[] {
+  const text = state.filter[side].trim().toLowerCase();
+  const rows = state.sheets[side];
+  if (!text) return rows;
+
+  return rows.filter((row) =>
+    [row.drawing_no, row.title, row.filename, row.revision]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(text)),
+  );
 }

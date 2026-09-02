@@ -81,6 +81,51 @@ class JobState(StrEnum):
     CANCELLED = "cancelled"
 
 
+class IssueType(StrEnum):
+    """Whether the current issue is the whole set or only what changed.
+
+    This single answer changes the meaning of the whole register, so it is
+    asked rather than assumed, and recorded in the audit log.
+    """
+
+    FULL = "full"
+    PARTIAL = "partial"
+    UNKNOWN = "unknown"
+
+
+class RegisterStatus(StrEnum):
+    """The reconciliation result for one drawing number."""
+
+    REVISED = "revised"
+    UNCHANGED = "unchanged"
+    #: Same revision, different content. Someone reissued without bumping it.
+    SAME_REV_DIFFERENT_FILE = "same_rev_different_file"
+    NEW = "new"
+    #: Old-only on a partial issue. Entirely normal, needs no action.
+    NOT_REISSUED = "not_reissued"
+    #: Old-only on a full issue. Possible scope deletion, needs confirmation.
+    REMOVED = "removed"
+    SUPERSEDED_IN_FOLDER = "superseded_in_folder"
+    DUPLICATE_FILE = "duplicate_file"
+    UNIDENTIFIED = "unidentified"
+    UNREADABLE = "unreadable"
+    IN_LIST_NOT_IN_FOLDER = "in_list_not_in_folder"
+    IN_FOLDER_NOT_IN_LIST = "in_folder_not_in_list"
+    STATUS_CHANGE = "status_change"
+
+
+#: Statuses the user has to look at. Sorted to the top of the register.
+NEEDS_ATTENTION: frozenset[RegisterStatus] = frozenset(
+    {
+        RegisterStatus.SAME_REV_DIFFERENT_FILE,
+        RegisterStatus.UNIDENTIFIED,
+        RegisterStatus.UNREADABLE,
+        RegisterStatus.REMOVED,
+        RegisterStatus.IN_LIST_NOT_IN_FOLDER,
+    }
+)
+
+
 class AiMode(StrEnum):
     """Chosen by the user in Settings. Offline is the default."""
 
