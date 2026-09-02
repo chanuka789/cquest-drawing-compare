@@ -200,6 +200,7 @@ def identify_sheets(
                 file_hash = None
 
         page_text = extract_document_text(info.path)
+        page_records: list[SheetRecord] = []
 
         for page in info.pages:
             text = page_text.get(page.index)
@@ -239,7 +240,9 @@ def identify_sheets(
             else:
                 record.warnings = ["This sheet has no readable text layer."]
 
-            records.append(record)
+            page_records.append(record)
+
+        records.extend(_collapse_multi_sheet(page_records))
 
         if reporter is not None:
             reporter.advance(filename)
@@ -248,6 +251,36 @@ def identify_sheets(
         reporter.finished(f"Read {len(records)} drawings.")
 
     return records
+
+
+def _collapse_multi_sheet(page_records: list[SheetRecord]) -> list[SheetRecord]:
+    """Collapse the pages of one file that all carry the same drawing number.
+
+    One file is not one drawing, and neither is one page. A 30-page issue PDF
+    holds 30 different drawings, but a drawing issued as "Sheet 1 of 3" is a
+    single drawing spread over three pages.
+
+    Without this, the second and third sheets look like the same drawing
+    appearing twice in one folder, and the register reports them as
+    "superseded in folder" -- telling the user that current sheets have been
+    superseded, which is simply untrue.
+    """
+    if len(page_records) < 2:
+        return page_records
+
+    identified = [record for record in page_records if record.identified]
+    if len(identified) != len(page_records):
+        # Some pages had no number of their own. Keep every page, so nothing
+        # is silently dropped and the user can resolve them one by one.
+        return page_records
+
+    numbers = {record.normalised_no for record in identified}
+    if len(numbers) > 1:
+        return page_records  # a multi-drawing file: each page is its own sheet
+
+    first = page_records[0]
+    first.sheets_in_drawing = len(page_records)
+    return [first]
 
 
 def _page_identity_hash(file_hash: str | None, page_index: int, page_count: int) -> str | None:

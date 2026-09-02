@@ -23,6 +23,7 @@ from engine.core.models import ListEntry, ReconcileResult, SheetRecord
 from engine.core.pipeline import DeepPassResult, intake_folder
 from engine.core.workspace import Workspace, create_workspace
 from engine.ingest.folder_scanner import ScanResult, scan_folder
+from engine.register.list_matcher import ListMatchResult
 from engine.register.list_parser import ParseResult
 from engine.storage.cache_store import CacheStore
 from engine.titleblock.patterns import load_profile
@@ -84,6 +85,10 @@ class ComparisonSession:
         self.drawing_list_path: str | None = None
         self.drawing_list: list[ListEntry] = []
         self.list_parse: ParseResult | None = None
+        self.list_match: ListMatchResult | None = None
+        #: The user's literal answer to the issue-type question, which can
+        #: be 'compare_reissued' as well as 'full' or 'partial'.
+        self.issue_type_answer: str | None = None
         self.register: ReconcileResult | None = None
         self._cache: CacheStore | None = None
         self._cancel = CancelToken()
@@ -183,10 +188,18 @@ class ComparisonSession:
     # -- the register --------------------------------------------------
 
     def build_register(self, issue_type: IssueType | None = None) -> ReconcileResult:
+        from engine.register.list_matcher import apply_drawing_list
         from engine.register.reconciler import reconcile
 
         if issue_type is not None:
             self.issue_type = issue_type
+
+        # Priority 4 of the drawing-number order: the list fills gaps the
+        # sheets themselves could not, and never overwrites a title block.
+        if self.drawing_list:
+            self.list_match = apply_drawing_list(
+                [*self.old.sheets, *self.new.sheets], self.drawing_list
+            )
 
         self.register = reconcile(
             self.old.sheets,
@@ -213,6 +226,8 @@ class ComparisonSession:
             "profile": self.profile_id,
             "tolerance_mm": self.tolerance_mm,
             "issue_type": str(self.issue_type),
+            "issue_type_answer": self.issue_type_answer or str(self.issue_type),
+            "drawing_list_matches": self.list_match.total if self.list_match else 0,
             "old_file_count": self.old.file_count,
             "new_file_count": self.new.file_count,
             "old_sheet_count": self.old.sheet_count,
@@ -229,6 +244,7 @@ class ComparisonSession:
             self.drawing_list = []
             self.drawing_list_path = None
             self.list_parse = None
+            self.list_match = None
 
 
 #: One session per running application.

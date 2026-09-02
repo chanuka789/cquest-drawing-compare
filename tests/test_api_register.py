@@ -317,7 +317,7 @@ def test_exporting_without_an_output_folder_says_what_to_do(client, normal_pair)
     scan_both(client, old_dir, new_dir)
     client.post("/api/register", json={"issue_type": "full"})
 
-    response = client.post("/api/register/export")
+    response = client.post("/api/report/register")
 
     assert response.status_code == 422
     assert "output folder" in response.json()["error"]["message"]
@@ -331,7 +331,7 @@ def test_the_register_exports_into_the_workspace(client, normal_pair, tmp_path: 
     client.post("/api/output", json={"folder": str(output)})
     client.post("/api/register", json={"issue_type": "full"})
 
-    response = client.post("/api/register/export")
+    response = client.post("/api/report/register")
 
     assert response.status_code == 200
     written = Path(response.json()["path"])
@@ -355,3 +355,111 @@ def test_starting_a_new_comparison_clears_the_session(client, normal_pair):
 
     assert client.post("/api/session/reset").json() == {"reset": True}
     assert client.get("/api/sides").json()[0]["folder"] is None
+
+
+# ── The report routes ──────────────────────────────────────────────────
+
+
+def test_the_export_lives_under_the_report_routes(client, normal_pair, tmp_path: Path):
+    old_dir, new_dir = normal_pair
+    scan_both(client, old_dir, new_dir)
+
+    output = tmp_path / "Compare-report"
+    client.post("/api/output", json={"folder": str(output)})
+    client.post("/api/register", json={"issue_type": "full"})
+
+    response = client.post("/api/report/register")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert Path(body["path"]).is_file()
+    assert body["filename"] == "Drawing_Register.xlsx"
+    assert body["rows"] == 11
+
+
+def test_the_workspace_route_reports_where_output_goes(client, normal_pair, tmp_path: Path):
+    old_dir, new_dir = normal_pair
+    client.post("/api/folder", json={"side": "old", "folder": str(old_dir)})
+    client.post("/api/folder", json={"side": "new", "folder": str(new_dir)})
+
+    assert client.get("/api/report/workspace").json()["root"] is None
+
+    output = tmp_path / "ws-route"
+    client.post("/api/output", json={"folder": str(output)})
+
+    assert client.get("/api/report/workspace").json()["register"].endswith("01_Register")
+
+
+def test_exporting_without_a_register_says_what_to_do(client):
+    response = client.post("/api/report/register")
+
+    assert response.status_code == 422
+    assert "Build the register" in response.json()["error"]["message"]
+
+
+# ── The issue-type answer is recorded ──────────────────────────────────
+
+
+def test_the_literal_issue_type_answer_reaches_the_audit_log(client, tmp_path: Path):
+    """ "Compare only what was reissued" reconciles like a partial issue, but
+    it is a different statement of intent and the audit log must say which."""
+    import json
+
+    old_dir, new_dir = build_partial_issue_pair(tmp_path / "answer", old_count=20)
+    scan_both(client, old_dir, new_dir)
+
+    output = tmp_path / "answer-out"
+    client.post("/api/output", json={"folder": str(output)})
+    client.post("/api/register", json={"issue_type": "partial", "answer": "compare_reissued"})
+    client.post("/api/report/register")
+
+    payload = json.loads((output / "_audit" / "run_log.json").read_text(encoding="utf-8"))
+
+    assert payload["issue_type"] == "partial"
+    assert payload["issue_type_answer"] == "compare_reissued"
+
+
+# ── The drawing list identifies sheets ─────────────────────────────────
+
+
+def test_the_drawing_list_fills_gaps_the_sheets_could_not(client, tmp_path: Path):
+    from tests.fixture_builder import SheetSpec, build_clean_drawing_list, build_pdf
+
+    folder = tmp_path / "gaps"
+    # No title block, and a file name with no drawing number in it -- so the
+    # first three priorities all fail and only the drawing list can help.
+    build_pdf(
+        folder / "Ground Floor Plan.pdf",
+        [SheetSpec(include_title_block=False, body=["NO TITLE BLOCK"])],
+    )
+    client.post("/api/folder", json={"side": "new", "folder": str(folder)})
+    client.post("/api/scan/new")
+    get_session().wait_for_scans()
+
+    listing = build_clean_drawing_list(tmp_path / "list.xlsx")
+    client.post("/api/drawing-list/preview", json={"path": str(listing)})
+    client.post(
+        "/api/drawing-list/mapping",
+        json={"mapping": {"drawing_no": "Drawing No", "title": "Title", "revision": "Rev"}},
+    )
+
+    client.post("/api/register", json={"issue_type": "full"})
+    sheets = client.get("/api/sheets/new").json()
+
+    assert sheets[0]["drawing_no"] == "A-101"
+    assert sheets[0]["source_of_number"] == "drawing_list"
+
+
+def test_the_confirmed_mapping_is_remembered_on_the_profile(client, tmp_path: Path):
+    """The user should confirm a client's column layout once, not every time."""
+    from engine.titleblock.patterns import load_profile
+    from tests.fixture_builder import build_messy_drawing_list
+
+    listing = build_messy_drawing_list(tmp_path / "messy.xlsx")
+    client.post("/api/options", json={"profile_id": "remembered"})
+    client.post("/api/drawing-list/preview", json={"path": str(listing)})
+
+    mapping = {"drawing_no": "Dwg No.", "title": "Sheet Name", "revision": "Rev."}
+    client.post("/api/drawing-list/mapping", json={"mapping": mapping})
+
+    assert load_profile("remembered").list_column_mapping == mapping

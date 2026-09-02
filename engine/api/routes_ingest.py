@@ -69,6 +69,7 @@ class SheetOut(BaseModel):
     filename: str
     page_index: int
     page_count: int
+    sheets_in_drawing: int = 1
     drawing_no: str | None
     title: str | None
     revision: str | None
@@ -117,6 +118,7 @@ def _sheet_out(sheet: object) -> SheetOut:
         filename=sheet.filename,
         page_index=sheet.page_index,
         page_count=sheet.page_count,
+        sheets_in_drawing=sheet.sheets_in_drawing,
         drawing_no=sheet.drawing_no,
         title=sheet.title,
         revision=sheet.revision,

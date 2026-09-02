@@ -75,6 +75,9 @@ export function SetupScreen() {
             onChoose={() => void state.chooseFolder('old')}
             onToggle={() => state.toggleExpanded('old')}
             onFilterChange={(text) => state.setFilter('old', text)}
+            sortKey={state.sort.old}
+            ascending={state.sortAscending.old}
+            onSort={(key) => state.setSort('old', key)}
             onDropUnsupported={() => state.setNotice(DROP_NOT_SUPPORTED)}
           />
 
@@ -90,6 +93,9 @@ export function SetupScreen() {
             onChoose={() => void state.chooseFolder('new')}
             onToggle={() => state.toggleExpanded('new')}
             onFilterChange={(text) => state.setFilter('new', text)}
+            sortKey={state.sort.new}
+            ascending={state.sortAscending.new}
+            onSort={(key) => state.setSort('new', key)}
             onDropUnsupported={() => state.setNotice(DROP_NOT_SUPPORTED)}
           />
         </div>

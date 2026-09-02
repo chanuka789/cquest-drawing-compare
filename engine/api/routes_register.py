@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from engine.core.enums import IssueType
 from engine.core.models import ReconcileResult
 from engine.core.session import get_session
-from engine.core.workspace import write_audit_log
 from engine.utils.errors import ValidationError
 
 router = APIRouter(prefix="/api", tags=["register"])
@@ -28,6 +28,10 @@ class MappingRequest(BaseModel):
 
 class BuildRegisterRequest(BaseModel):
     issue_type: IssueType = IssueType.UNKNOWN
+    #: The user's literal choice, which may be "compare_reissued". It reconciles
+    #: the same way as a partial issue, but it is a different statement of
+    #: intent and the audit log records which was actually chosen.
+    answer: str | None = None
 
 
 class CorrectNumberRequest(BaseModel):
@@ -81,7 +85,33 @@ def apply_drawing_list_mapping(body: MappingRequest) -> dict[str, Any]:
     session.drawing_list = normalise_entries(parsed)
     session.register = None  # the register has to be rebuilt
 
+    # Remember the mapping on the sheet profile, so this client's register is
+    # read the same way next time and the user confirms it only once.
+    _remember_mapping(session.profile_id, parsed.mapping)
+
     return parsed.as_dict()
+
+
+def _remember_mapping(profile_id: str, mapping: dict[str, str]) -> None:
+    """Store a confirmed column mapping on the profile for reuse."""
+    from engine.titleblock.patterns import load_profile, save_profile
+
+    if not mapping:
+        return
+    try:
+        profile = load_profile(profile_id)
+        # `load_profile` falls back to the built-in defaults when the profile
+        # has never been saved, and that fallback is called "default". Without
+        # this the mapping would be written to default.json under every
+        # client's name.
+        profile.id = profile_id
+        if profile.list_column_mapping == mapping:
+            return
+        profile.list_column_mapping = dict(mapping)
+        save_profile(profile)
+    except OSError as exc:
+        # Failing to remember a preference must never fail the import.
+        logger.warning("Could not save the column mapping to {}: {}", profile_id, exc)
 
 
 @router.delete("/drawing-list", summary="Remove the imported drawing list")
@@ -113,6 +143,7 @@ def build_register(body: BuildRegisterRequest) -> ReconcileResult:
             "the scan finish first."
         )
 
+    session.issue_type_answer = body.answer or str(body.issue_type)
     return session.build_register(body.issue_type)
 
 
@@ -200,39 +231,3 @@ def _apply_pattern_to_unidentified(session: Any, example: str) -> int:
                 applied += 1
 
     return applied
-
-
-# ── Export ─────────────────────────────────────────────────────────────
-
-
-@router.post("/register/export", summary="Write the Excel register into the workspace")
-def export_register() -> dict[str, str]:
-    from engine import __version__
-    from engine.report.register_xlsx import write_register_to_workspace
-
-    session = get_session()
-
-    if session.register is None:
-        raise ValidationError("Build the register before exporting it.")
-    if session.workspace is None:
-        raise ValidationError(
-            "Choose an output folder before exporting. Everything the "
-            "application produces is written there."
-        )
-
-    path = write_register_to_workspace(
-        session.workspace,
-        session.register.rows,
-        session.register.summary,
-        quarantine=session.quarantine_entries(),
-        context={
-            "old_folder": session.old.folder or "",
-            "new_folder": session.new.folder or "",
-            "drawing_list": session.drawing_list_path or "",
-            "profile": session.profile_id,
-            "version": __version__,
-        },
-    )
-
-    write_audit_log(session.workspace, session.audit_payload())
-    return {"path": str(path), "folder": str(path.parent)}

@@ -67,6 +67,8 @@ interface SetupState {
   sheets: Record<IssueSide, SheetRow[]>;
   expanded: Record<IssueSide, boolean>;
   filter: Record<IssueSide, string>;
+  sort: Record<IssueSide, SheetSortKey>;
+  sortAscending: Record<IssueSide, boolean>;
 
   outputFolder: string | null;
   outputSuggestion: string | null;
@@ -92,6 +94,7 @@ interface SetupState {
   cancel: () => Promise<void>;
   toggleExpanded: (side: IssueSide) => void;
   setFilter: (side: IssueSide, text: string) => void;
+  setSort: (side: IssueSide, key: SheetSortKey) => void;
 
   chooseOutput: () => Promise<void>;
   acceptSuggestedOutput: () => Promise<void>;
@@ -116,6 +119,8 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   sheets: { old: [], new: [] },
   expanded: { old: false, new: false },
   filter: { old: '', new: '' },
+  sort: { old: 'drawing_no', new: 'drawing_no' },
+  sortAscending: { old: true, new: true },
 
   outputFolder: null,
   outputSuggestion: null,
@@ -229,6 +234,18 @@ export const useSetupStore = create<SetupState>((set, get) => ({
 
   setFilter: (side, text) => set({ filter: { ...get().filter, [side]: text } }),
 
+  setSort: (side, key) => {
+    const state = get();
+    if (state.sort[side] === key) {
+      set({ sortAscending: { ...state.sortAscending, [side]: !state.sortAscending[side] } });
+      return;
+    }
+    set({
+      sort: { ...state.sort, [side]: key },
+      sortAscending: { ...state.sortAscending, [side]: true },
+    });
+  },
+
   // ── Output folder ────────────────────────────────────────────────────
 
   acceptSuggestedOutput: async () => {
@@ -341,15 +358,30 @@ export function canBuildRegister(state: SetupState): boolean {
   );
 }
 
-/** Rows for one panel, after the filter box. */
+/** What the drawing list in a folder panel can be ordered by. */
+export type SheetSortKey = 'drawing_no' | 'title' | 'revision';
+
+/** Rows for one panel, after the filter box and the chosen sort. */
 export function visibleSheets(state: SetupState, side: IssueSide): SheetRow[] {
   const text = state.filter[side].trim().toLowerCase();
-  const rows = state.sheets[side];
-  if (!text) return rows;
+  let rows = state.sheets[side];
 
-  return rows.filter((row) =>
-    [row.drawing_no, row.title, row.filename, row.revision]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(text)),
-  );
+  if (text) {
+    rows = rows.filter((row) =>
+      [row.drawing_no, row.title, row.filename, row.revision]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(text)),
+    );
+  }
+
+  const key = state.sort[side];
+  const direction = state.sortAscending[side] ? 1 : -1;
+
+  return [...rows].sort((left, right) => {
+    // A sheet with no number sorts by its file name, so unidentified rows
+    // stay findable rather than clumping under an empty value.
+    const a = String(left[key] ?? (key === 'drawing_no' ? left.filename : ''));
+    const b = String(right[key] ?? (key === 'drawing_no' ? right.filename : ''));
+    return a.localeCompare(b, undefined, { numeric: true }) * direction;
+  });
 }

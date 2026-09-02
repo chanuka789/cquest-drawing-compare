@@ -1,5 +1,6 @@
 import type { IssueSide, SheetRow, SideState } from '../../api/types';
 import { baseName, truncateMiddle } from '../../lib/path';
+import type { SheetSortKey } from '../../store/setupStore';
 import { SheetList } from './SheetList';
 
 interface IssuePanelProps {
@@ -12,6 +13,9 @@ interface IssuePanelProps {
   onChoose: () => void;
   onToggle: () => void;
   onFilterChange: (text: string) => void;
+  sortKey: SheetSortKey;
+  ascending: boolean;
+  onSort: (key: SheetSortKey) => void;
   onDropUnsupported: () => void;
 }
 
@@ -32,6 +36,9 @@ export function IssuePanel({
   onChoose,
   onToggle,
   onFilterChange,
+  sortKey,
+  ascending,
+  onSort,
   onDropUnsupported,
 }: IssuePanelProps) {
   const chosen = state.folder !== null;
@@ -105,6 +112,9 @@ export function IssuePanel({
           rows={rows}
           filter={filter}
           onFilterChange={onFilterChange}
+          sortKey={sortKey}
+          ascending={ascending}
+          onSort={onSort}
           isScanning={state.is_scanning}
         />
       )}

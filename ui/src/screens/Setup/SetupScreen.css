@@ -599,3 +599,15 @@
   padding-left: var(--space-1);
   color: var(--text-mid);
 }
+
+.sheets__sort {
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+.sheets__sort:hover {
+  color: var(--text-hi);
+}

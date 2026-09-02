@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import type { SheetRow } from '../../api/types';
+import type { SheetSortKey } from '../../store/setupStore';
 
 const ROW_HEIGHT = 34;
 
@@ -20,6 +21,9 @@ interface SheetListProps {
   rows: SheetRow[];
   filter: string;
   onFilterChange: (text: string) => void;
+  sortKey: SheetSortKey;
+  ascending: boolean;
+  onSort: (key: SheetSortKey) => void;
   isScanning: boolean;
 }
 
@@ -30,8 +34,36 @@ interface SheetListProps {
  * register can hold thousands. Rows appear from the fast pass with nothing
  * but a file name and fill in as the deep pass reports each sheet.
  */
-export function SheetList({ rows, filter, onFilterChange, isScanning }: SheetListProps) {
+export function SheetList({
+  rows,
+  filter,
+  onFilterChange,
+  sortKey,
+  ascending,
+  onSort,
+  isScanning,
+}: SheetListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+
+  const SortHeading = ({
+    label,
+    field,
+    centre = false,
+  }: {
+    label: string;
+    field: SheetSortKey;
+    centre?: boolean;
+  }) => (
+    <button
+      type="button"
+      className={`sheets__sort${centre ? ' sheets__cell--centre' : ''}`}
+      onClick={() => onSort(field)}
+      aria-label={`Sort by ${label.toLowerCase()}`}
+    >
+      {label}
+      {sortKey === field && <span aria-hidden="true">{ascending ? ' ↑' : ' ↓'}</span>}
+    </button>
+  );
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -55,9 +87,9 @@ export function SheetList({ rows, filter, onFilterChange, isScanning }: SheetLis
       </div>
 
       <div className="sheets__head micro">
-        <span>Drawing no.</span>
-        <span>Title</span>
-        <span className="sheets__cell--centre">Rev</span>
+        <SortHeading label="Drawing no." field="drawing_no" />
+        <SortHeading label="Title" field="title" />
+        <SortHeading label="Rev" field="revision" centre />
         <span className="sheets__cell--centre">Pages</span>
         <span className="sheets__cell--centre">Source</span>
       </div>
@@ -98,8 +130,19 @@ export function SheetList({ rows, filter, onFilterChange, isScanning }: SheetLis
 
                 <span className="sheets__cell--centre tabular">{row.revision ?? ''}</span>
 
-                <span className="sheets__cell--centre tabular">
-                  {row.page_count > 1 ? `${row.page_index + 1}/${row.page_count}` : '1'}
+                <span
+                  className="sheets__cell--centre tabular"
+                  title={
+                    row.sheets_in_drawing > 1
+                      ? `One drawing issued across ${row.sheets_in_drawing} sheets`
+                      : undefined
+                  }
+                >
+                  {row.sheets_in_drawing > 1
+                    ? `1 of ${row.sheets_in_drawing}`
+                    : row.page_count > 1
+                      ? `${row.page_index + 1}/${row.page_count}`
+                      : '1'}
                 </span>
 
                 <span

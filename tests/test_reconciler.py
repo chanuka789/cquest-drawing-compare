@@ -368,3 +368,83 @@ def test_a_generated_partial_issue_reports_no_removals(tmp_path: Path):
     assert RegisterStatus.REMOVED not in statuses
     assert answered.summary.counts[RegisterStatus.NOT_REISSUED] == 17
     assert answered.summary.counts[RegisterStatus.REVISED] == 3
+
+
+# ── Multi-sheet drawings ───────────────────────────────────────────────
+
+
+def test_a_drawing_issued_across_several_sheets_is_one_drawing(tmp_path: Path):
+    """Regression: "Sheet 1 of 3" was reported as superseded duplicates.
+
+    One file is not one drawing, and neither is one page. When every page of a
+    file carries the same number it is a single drawing spread over several
+    sheets, and saying its own sheets superseded it is simply untrue.
+    """
+    from tests.fixture_builder import SheetSpec, build_pdf
+
+    pages = [
+        SheetSpec(drawing_no="A-400", title="DETAILS", revision="C"),
+        SheetSpec(drawing_no="A-400", title="DETAILS", revision="C", body=["SHEET 2"]),
+        SheetSpec(drawing_no="A-400", title="DETAILS", revision="C", body=["SHEET 3"]),
+    ]
+    build_pdf(tmp_path / "old" / "A-400.pdf", pages)
+    build_pdf(
+        tmp_path / "new" / "A-400.pdf",
+        [
+            SheetSpec(drawing_no="A-400", title="DETAILS", revision="D"),
+            SheetSpec(drawing_no="A-400", title="DETAILS", revision="D", body=["SHEET 2"]),
+            SheetSpec(drawing_no="A-400", title="DETAILS", revision="D", body=["SHEET 3"]),
+        ],
+    )
+
+    old_sheets, _ = intake_folder(str(tmp_path / "old"), side=Side.OLD, run_id="ms-old")
+    new_sheets, _ = intake_folder(str(tmp_path / "new"), side=Side.NEW, run_id="ms-new")
+
+    assert len(old_sheets) == 1
+    assert old_sheets[0].sheets_in_drawing == 3
+
+    result = reconcile(old_sheets, new_sheets, issue_type=IssueType.FULL)
+
+    assert len(result.rows) == 1
+    row = result.rows[0]
+    assert row.drawing_no == "A-400"
+    assert row.status is RegisterStatus.REVISED
+    assert row.superseded_paths == []
+    assert row.duplicate_paths == []
+
+
+def test_a_file_holding_many_drawings_still_yields_many_sheets(tmp_path: Path):
+    """The opposite case: a 3-drawing issue PDF is three drawings."""
+    from tests.fixture_builder import SheetSpec, build_pdf
+
+    build_pdf(
+        tmp_path / "new" / "issue.pdf",
+        [
+            SheetSpec(drawing_no="A-101", title="GROUND FLOOR PLAN"),
+            SheetSpec(drawing_no="A-102", title="FIRST FLOOR PLAN"),
+            SheetSpec(drawing_no="A-103", title="ROOF PLAN"),
+        ],
+    )
+
+    sheets, _ = intake_folder(str(tmp_path / "new"), side=Side.NEW, run_id="multi")
+
+    assert len(sheets) == 3
+    assert {sheet.drawing_no for sheet in sheets} == {"A-101", "A-102", "A-103"}
+    assert all(sheet.sheets_in_drawing == 1 for sheet in sheets)
+
+
+def test_pages_without_numbers_are_all_kept_for_the_user(tmp_path: Path):
+    """Nothing is silently dropped when a page cannot be identified."""
+    from tests.fixture_builder import SheetSpec, build_pdf
+
+    build_pdf(
+        tmp_path / "new" / "mixed.pdf",
+        [
+            SheetSpec(drawing_no="A-101"),
+            SheetSpec(include_title_block=False, body=["NO NUMBER"]),
+        ],
+    )
+
+    sheets, _ = intake_folder(str(tmp_path / "new"), side=Side.NEW, run_id="mixed")
+
+    assert len(sheets) == 2

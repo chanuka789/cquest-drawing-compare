@@ -240,8 +240,14 @@ export function clearDrawingList(): Promise<{ cleared: boolean }> {
 
 // ── The register ───────────────────────────────────────────────────────
 
-export function buildRegister(issueType: IssueType): Promise<ReconcileResult> {
-  return post<ReconcileResult>('/api/register', { issue_type: issueType });
+export function buildRegister(
+  issueType: IssueType,
+  answer?: string,
+): Promise<ReconcileResult> {
+  return post<ReconcileResult>('/api/register', {
+    issue_type: issueType,
+    answer: answer ?? null,
+  });
 }
 
 export function correctDrawingNumber(body: {
@@ -253,6 +259,11 @@ export function correctDrawingNumber(body: {
   return post('/api/register/correct', body);
 }
 
-export function exportRegister(): Promise<{ path: string; folder: string }> {
-  return post<{ path: string; folder: string }>('/api/register/export');
+export function exportRegister(): Promise<{
+  path: string;
+  folder: string;
+  rows: number;
+  filename: string;
+}> {
+  return post('/api/report/register');
 }

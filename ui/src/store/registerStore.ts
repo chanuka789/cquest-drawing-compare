@@ -53,7 +53,7 @@ interface RegisterState {
   exportedPath: string | null;
   notice: string | null;
 
-  build: (issueType?: IssueType) => Promise<void>;
+  build: (issueType?: IssueType, answer?: string) => Promise<void>;
   answerIssueType: (answer: string) => Promise<void>;
   setSearch: (text: string) => void;
   setStatusFilter: (status: RegisterStatus | null) => void;
@@ -90,12 +90,12 @@ export const useRegisterStore = create<RegisterState>((set, get) => ({
   exportedPath: null,
   notice: null,
 
-  build: async (issueType) => {
+  build: async (issueType, answer) => {
     const chosen = issueType ?? get().issueType;
     set({ loading: true, error: null, notice: null });
 
     try {
-      const result = await buildRegister(chosen);
+      const result = await buildRegister(chosen, answer);
 
       if (result.needs_issue_type_confirmation) {
         // No register until the question is answered: guessing here would
@@ -123,9 +123,12 @@ export const useRegisterStore = create<RegisterState>((set, get) => ({
 
   answerIssueType: async (answer) => {
     // "Compare only what was reissued" is a partial issue with a clearer name.
+    // "Compare only what was reissued" reconciles as a partial issue, but it
+    // is a different statement of intent, so the literal answer travels with
+    // the request and lands in the audit log.
     const issueType: IssueType = answer === 'full' ? 'full' : 'partial';
     set({ issueType, question: null });
-    await get().build(issueType);
+    await get().build(issueType, answer);
   },
 
   setSearch: (search) => set({ search }),

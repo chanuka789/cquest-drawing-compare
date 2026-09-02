@@ -25,7 +25,13 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from engine.api import routes_ingest, routes_register, routes_system, ws_progress
+from engine.api import (
+    routes_ingest,
+    routes_register,
+    routes_report,
+    routes_system,
+    ws_progress,
+)
 from engine.core.events import shutdown_requested
 from engine.core.project import ensure_workspace_db
 from engine.settings import Settings, get_settings
@@ -184,6 +190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_system.router)
     app.include_router(routes_ingest.router)
     app.include_router(routes_register.router)
+    app.include_router(routes_report.router)
     app.include_router(ws_progress.router)
 
     # The SPA fallback claims `/{path}`, so it must be mounted last.

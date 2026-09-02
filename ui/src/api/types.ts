@@ -77,6 +77,8 @@ export interface SheetRow {
   filename: string;
   page_index: number;
   page_count: number;
+  /** A drawing issued as 'Sheet 1 of 3' is one drawing, not three. */
+  sheets_in_drawing: number;
   drawing_no: string | null;
   title: string | null;
   revision: string | null;

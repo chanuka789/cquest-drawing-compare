@@ -62,6 +62,9 @@ class SheetRecord(BaseModel):
     filename: str = ""
     page_index: int = 0
     page_count: int = 1
+    #: How many pages of this file belong to this one drawing.
+    #: A drawing issued as "Sheet 1 of 3" is one drawing, not three.
+    sheets_in_drawing: int = 1
 
     drawing_no: str | None = None
     #: Comparison form of the number: upper case, separators removed.
