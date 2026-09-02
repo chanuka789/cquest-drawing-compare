@@ -366,16 +366,25 @@ def extract_identity(
     filename: str = "",
     profile: SheetProfile | None = None,
     sheet_size: str | None = None,
+    *,
+    filename_names_the_sheet: bool = True,
 ) -> SheetIdentity:
     """Read the identity of one sheet.
 
-    Always reads the number from the title block **and** from the file name,
-    so a disagreement between them can be flagged.
+    Reads the number from the title block **and** from the file name, so a
+    disagreement between them can be flagged.
+
+    `filename_names_the_sheet` must be False when the file holds more than one
+    drawing. A 30-drawing issue PDF is named for the issue, not for any sheet
+    inside it, so comparing the two is meaningless: it flagged every sheet in a
+    real issue as a mismatch and buried the findings that mattered.
     """
     profile = profile or load_profile()
     identity = SheetIdentity(page_index=page.page_index, sheet_size=sheet_size)
 
-    identity.filename_number = number_from_filename(filename, profile) if filename else None
+    identity.filename_number = (
+        number_from_filename(filename, profile) if filename and filename_names_the_sheet else None
+    )
 
     zones = [zone for zone in detect_zones(page) if not zone.is_empty]
     title_zones = [zone for zone in zones if zone.name is not ZoneName.WHOLE_SHEET]

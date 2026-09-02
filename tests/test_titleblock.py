@@ -404,3 +404,62 @@ def test_the_real_titles_and_scales_are_read():
     assert by_number["A-102"].title == "FIRST FLOOR PLAN"
     assert by_number["A-101"].scale == "1:100"
     assert by_number["A-104"].title == "GROUND FLOOR REFLECTED CEILING PLAN"
+
+
+# ── The mismatch flag must not cry wolf ────────────────────────────────
+
+
+def test_a_multi_drawing_file_never_reports_a_number_mismatch(tmp_path: Path):
+    """Regression: a 30-drawing issue PDF flagged every sheet as a mismatch.
+
+    An issue is often delivered as one PDF named for the issue, like
+    `LM2426_D_00-Al Basateen Farm.pdf`. That name parses to something that
+    looks like a number but names no sheet, so comparing it against each
+    title block flagged all 30 drawings and buried the real findings.
+    """
+    path = build_pdf(
+        tmp_path / "LM2426_D_00-Al Basateen Farm.pdf",
+        [
+            SheetSpec(drawing_no="A-101", title="GROUND FLOOR PLAN"),
+            SheetSpec(drawing_no="A-102", title="FIRST FLOOR PLAN"),
+        ],
+    )
+    pages = extract_document_text(str(path))
+
+    identities = [
+        extract_identity(page, filename=path.name, filename_names_the_sheet=False)
+        for page in pages.values()
+    ]
+
+    assert [item.drawing_no for item in identities] == ["A-101", "A-102"]
+    assert not any(item.number_mismatch for item in identities)
+    assert not any(item.warnings for item in identities)
+
+
+def test_a_single_drawing_file_still_reports_a_mismatch(sheet_page):
+    """The flag must keep working where it means something."""
+    _, page = sheet_page
+    identity = extract_identity(page, filename="A-999-wrongly-named.pdf")
+
+    assert identity.number_mismatch
+    assert identity.filename_number == "A-999"
+
+
+def test_the_pipeline_decides_by_page_count(tmp_path: Path):
+    """A one-drawing file compares the name; a many-drawing file does not."""
+    from engine.core.enums import Side
+    from engine.core.pipeline import intake_folder
+
+    folder = tmp_path / "mixed"
+    build_pdf(folder / "A-999-wrongly-named.pdf", [SheetSpec(drawing_no="A-101")])
+    build_pdf(
+        folder / "ISSUE_D_00-whole-set.pdf",
+        [SheetSpec(drawing_no="A-201"), SheetSpec(drawing_no="A-202")],
+    )
+
+    sheets, _ = intake_folder(str(folder), side=Side.NEW, run_id="mismatch")
+    by_number = {sheet.drawing_no: sheet for sheet in sheets}
+
+    assert by_number["A-101"].number_mismatch is True
+    assert by_number["A-201"].number_mismatch is False
+    assert by_number["A-202"].number_mismatch is False

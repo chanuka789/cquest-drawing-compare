@@ -206,7 +206,13 @@ def identify_sheets(
             text = page_text.get(page.index)
             identity = (
                 extract_identity(
-                    text, filename=filename, profile=profile, sheet_size=page.sheet_size
+                    text,
+                    filename=filename,
+                    profile=profile,
+                    sheet_size=page.sheet_size,
+                    # A file holding many drawings is named for the issue, not
+                    # for any one sheet in it.
+                    filename_names_the_sheet=info.page_count == 1,
                 )
                 if text is not None
                 else None
