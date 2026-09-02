@@ -73,8 +73,13 @@ export async function getApiPort(): Promise<number | null> {
  */
 export async function pickFolder(title = 'Choose a folder'): Promise<string | null> {
   const api = window.pywebview?.api;
-  if (!api?.pick_folder) return null;
-  return (await api.pick_folder(title)) ?? null;
+  if (!api?.pick_folder) throw new NativeError(NO_BRIDGE_MESSAGE);
+
+  try {
+    return (await api.pick_folder(title)) ?? null;
+  } catch (cause) {
+    throw new NativeError(DIALOG_FAILED_MESSAGE, cause);
+  }
 }
 
 /** Open the native file dialog. `fileTypes` uses the pywebview filter form. */
@@ -83,10 +88,32 @@ export async function pickFile(
   fileTypes: string[] = [],
 ): Promise<string | null> {
   const api = window.pywebview?.api;
-  if (!api?.pick_file) return null;
-  return (await api.pick_file(title, fileTypes)) ?? null;
+  if (!api?.pick_file) throw new NativeError(NO_BRIDGE_MESSAGE);
+
+  try {
+    return (await api.pick_file(title, fileTypes)) ?? null;
+  } catch (cause) {
+    throw new NativeError(DIALOG_FAILED_MESSAGE, cause);
+  }
 }
 
-/** Why a dialog is unavailable, phrased as an instruction rather than a fault. */
+/** A dialog could not be opened. Carries the cause for the log, not the user. */
+export class NativeError extends Error {
+  override readonly cause: unknown;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = 'NativeError';
+    this.cause = cause;
+  }
+}
+
+/** Shown in a plain browser tab, where there is no native dialog to open. */
 export const NO_BRIDGE_MESSAGE =
-  'Folder picking needs the desktop application. Run it with "python -m engine.main".';
+  'Choosing a folder needs the desktop application. Open C-Quest Drawing Compare ' +
+  'rather than a browser tab.';
+
+/** Shown when the dialog itself failed, which is a fault worth reporting. */
+export const DIALOG_FAILED_MESSAGE =
+  'The folder chooser could not be opened. Close the application and start it ' +
+  'again; if it keeps happening, the details are in the log file.';

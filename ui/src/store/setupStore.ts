@@ -31,7 +31,7 @@ import type {
   SheetRow,
   SideState,
 } from '../api/types';
-import { NO_BRIDGE_MESSAGE, isDesktop, pickFile, pickFolder } from '../lib/native';
+import { NativeError, pickFile, pickFolder } from '../lib/native';
 
 /** Tolerance is always in millimetres at drawing scale, never in pixels. */
 export const TOLERANCES = [
@@ -108,9 +108,10 @@ interface SetupState {
 }
 
 function message(error: unknown): string {
-  return error instanceof ApiError
-    ? error.message
-    : 'Something went wrong. The details are in the log file.';
+  if (error instanceof ApiError) return error.message;
+  // A NativeError already carries wording written for the user.
+  if (error instanceof NativeError) return error.message;
+  return 'Something went wrong. The details are in the log file.';
 }
 
 export const useSetupStore = create<SetupState>((set, get) => ({
@@ -155,15 +156,17 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   },
 
   chooseFolder: async (side) => {
-    if (!isDesktop()) {
-      set({ notice: NO_BRIDGE_MESSAGE });
+    set({ notice: null });
+    let chosen: string | null;
+    try {
+      chosen = await pickFolder(DIALOG_TITLES[side]);
+    } catch (error) {
+      set({ notice: message(error) });
       return;
     }
-
-    const chosen = await pickFolder(DIALOG_TITLES[side]);
     if (!chosen) return;
 
-    set({ busy: true, notice: null });
+    set({ busy: true });
     try {
       const state = await apiSetFolder(side, chosen);
       const before = get();
@@ -268,12 +271,13 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   },
 
   chooseOutput: async () => {
-    if (!isDesktop()) {
-      set({ notice: NO_BRIDGE_MESSAGE });
+    let chosen: string | null;
+    try {
+      chosen = await pickFolder('Choose where to save the results');
+    } catch (error) {
+      set({ notice: message(error) });
       return;
     }
-
-    const chosen = await pickFolder('Choose where to save the results');
     if (!chosen) return;
 
     try {
@@ -295,15 +299,16 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   // ── The drawing list ─────────────────────────────────────────────────
 
   chooseDrawingList: async () => {
-    if (!isDesktop()) {
-      set({ notice: NO_BRIDGE_MESSAGE });
+    let chosen: string | null;
+    try {
+      chosen = await pickFile('Choose the issued drawing list', DRAWING_LIST_TYPES);
+    } catch (error) {
+      set({ notice: message(error) });
       return;
     }
-
-    const chosen = await pickFile('Choose the issued drawing list', DRAWING_LIST_TYPES);
     if (!chosen) return;
 
-    set({ busy: true });
+    set({ busy: true, notice: null });
     try {
       const parse = await previewDrawingList(chosen);
       set({ drawingListPath: chosen, listParse: parse, notice: null });

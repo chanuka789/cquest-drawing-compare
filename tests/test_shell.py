@@ -135,3 +135,71 @@ def test_the_engine_stops_promptly_with_a_progress_socket_open():
         elapsed = time.perf_counter() - started
 
     assert elapsed < 4.0, f"shutdown took {elapsed:.1f}s with a socket open"
+
+
+# ── The native dialogs ─────────────────────────────────────────────────
+
+
+class _FakeWindow:
+    """Stands in for a pywebview window, but checks the call the way it would.
+
+    The point is the signature. The real failure was calling
+    `create_file_dialog(dialog_title=...)`, which pywebview does not accept, so
+    every folder and file pick raised and nothing reached the application.
+    """
+
+    def __init__(self, returns: object = None) -> None:
+        self.returns = returns
+        self.calls: list[tuple[tuple, dict]] = []
+
+    def create_file_dialog(self, *args, **kwargs):
+        import inspect
+
+        from webview.window import Window
+
+        # Bind against the real signature: a keyword pywebview does not have
+        # must fail here exactly as it would at runtime.
+        inspect.signature(Window.create_file_dialog).bind(self, *args, **kwargs)
+        self.calls.append((args, kwargs))
+        return self.returns
+
+
+def test_pick_folder_calls_pywebview_the_way_pywebview_expects(monkeypatch):
+    """Regression: `dialog_title` is not a pywebview parameter."""
+    window = _FakeWindow(returns=(r"D:\drawings\IFC Rev D",))
+    monkeypatch.setattr(JsApi, "_window", staticmethod(lambda: window))
+
+    chosen = JsApi(1234).pick_folder("Choose the folder for the previous issue")
+
+    assert chosen == r"D:\drawings\IFC Rev D"
+    assert window.calls, "the dialog was never opened"
+
+
+def test_pick_file_calls_pywebview_the_way_pywebview_expects(monkeypatch):
+    window = _FakeWindow(returns=(r"D:\lists\register.xlsx",))
+    monkeypatch.setattr(JsApi, "_window", staticmethod(lambda: window))
+
+    chosen = JsApi(1234).pick_file(
+        "Choose the issued drawing list", ["Drawing list (*.xlsx)", "All files (*.*)"]
+    )
+
+    assert chosen == r"D:\lists\register.xlsx"
+    _, kwargs = window.calls[0]
+    assert kwargs["allow_multiple"] is False
+    assert kwargs["file_types"] == ("Drawing list (*.xlsx)", "All files (*.*)")
+
+
+def test_cancelling_a_dialog_returns_none(monkeypatch):
+    window = _FakeWindow(returns=None)
+    monkeypatch.setattr(JsApi, "_window", staticmethod(lambda: window))
+
+    assert JsApi(1234).pick_folder() is None
+    assert JsApi(1234).pick_file() is None
+
+
+def test_the_dialog_kinds_are_the_ones_pywebview_understands():
+    """Folder and open are different dialogs; mixing them picks the wrong thing."""
+    from engine.main import FOLDER_DIALOG, OPEN_DIALOG
+
+    assert int(FOLDER_DIALOG) == 20
+    assert int(OPEN_DIALOG) == 10

@@ -52,6 +52,21 @@ BACKGROUND = "#14181C"  # --room-900, so the window never flashes white
 STARTUP_TIMEOUT_SECONDS = 15.0
 STARTUP_POLL_SECONDS = 0.1
 
+#: Bound on Uvicorn's graceful shutdown. The page holds keep-alive
+#: connections open, and without a bound they keep the server waiting after
+#: the window has already gone.
+GRACEFUL_SHUTDOWN_SECONDS = 2
+
+# The dialog kinds, resolved once. `webview.FileDialog` is the current API;
+# the bare `FOLDER_DIALOG`/`OPEN_DIALOG` constants still work but warn on every
+# access, and are due to be removed.
+try:
+    FOLDER_DIALOG = webview.FileDialog.FOLDER
+    OPEN_DIALOG = webview.FileDialog.OPEN
+except AttributeError:  # pragma: no cover - older pywebview
+    FOLDER_DIALOG = webview.FOLDER_DIALOG
+    OPEN_DIALOG = webview.OPEN_DIALOG
+
 
 # ── Port ───────────────────────────────────────────────────────────────
 
@@ -82,6 +97,7 @@ class EngineServer:
             log_level="warning",  # loguru owns the log files
             access_log=False,
             lifespan="on",
+            timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
         )
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, name="cqdc-engine", daemon=True)
@@ -159,12 +175,23 @@ class JsApi:
 
     # -- dialogs -------------------------------------------------------
 
-    def pick_folder(self, title: str = "Choose a folder") -> str | None:
-        """Open the Windows folder dialog. Returns a real path, or None."""
+    def pick_folder(self, title: str = "Choose a folder", directory: str = "") -> str | None:
+        """Open the Windows folder dialog. Returns a real path, or None.
+
+        `title` is not passed to pywebview: `create_file_dialog` has no such
+        parameter, and passing one raises. It is kept because it says which
+        picker the user asked for, which is what the log needs to be readable.
+        """
         window = self._window()
         if window is None:
             return None
-        result = window.create_file_dialog(webview.FOLDER_DIALOG, dialog_title=title)
+
+        try:
+            result = window.create_file_dialog(FOLDER_DIALOG, directory=directory)
+        except Exception as exc:
+            logger.exception("Folder dialog failed: {}", exc)
+            raise
+
         chosen = self._first(result)
         logger.info("pick_folder | title={} | chosen={}", title, chosen)
         return chosen
@@ -173,6 +200,7 @@ class JsApi:
         self,
         title: str = "Choose a file",
         file_types: list[str] | tuple[str, ...] | None = None,
+        directory: str = "",
     ) -> str | None:
         """Open the Windows file dialog. Returns a real path, or None.
 
@@ -182,12 +210,18 @@ class JsApi:
         window = self._window()
         if window is None:
             return None
-        result = window.create_file_dialog(
-            webview.OPEN_DIALOG,
-            dialog_title=title,
-            allow_multiple=False,
-            file_types=tuple(file_types) if file_types else (),
-        )
+
+        try:
+            result = window.create_file_dialog(
+                OPEN_DIALOG,
+                directory=directory,
+                allow_multiple=False,
+                file_types=tuple(file_types) if file_types else (),
+            )
+        except Exception as exc:
+            logger.exception("File dialog failed: {}", exc)
+            raise
+
         chosen = self._first(result)
         logger.info("pick_file | title={} | chosen={}", title, chosen)
         return chosen
