@@ -57,3 +57,6 @@ quote-style = "double"
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["error::DeprecationWarning:engine.*"]
+markers = [
+    "benchmark: full ground-truth alignment benchmark; opt-in only, never in the default suite",
+]

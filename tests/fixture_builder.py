@@ -624,3 +624,725 @@ def build_collision_folder(root: str | Path) -> Path:
     )
 
     return new_dir
+
+
+# ── Phase 4 fixtures: `10_alignment` ─────────────────────────────────
+
+#: Content band of a rich drawing page, as fractions of the sheet
+#: (x0, y0, x1, y1). The band clears the bottom-right title-block strip, so a
+#: text-anchor matcher that excludes that strip still sees the real content.
+ALIGN_CONTENT_REGION = (0.08, 0.2, 0.92, 0.95)
+
+#: The bottom-right strip that holds the title block, as fractions of the
+#: sheet. Anchor matching must exclude every text item whose origin lands in
+#: it: that text is identical sheet furniture on every issue of every sheet.
+ALIGN_TITLEBLOCK_ZONE = (0.7, 0.0, 1.0, 0.12)
+
+#: How many unique labels a rich drawing page carries: RM-01 .. RM-24.
+ALIGN_LABEL_COUNT = 24
+#: The labels form a 6-column x 4-row matrix inside the content band.
+ALIGN_LABEL_COLUMNS = 6
+ALIGN_LABEL_ROWS = 4
+
+#: Content band of the rescaled pair's old sheet, centred on the page centre.
+#: Scaling it 2.0 about the centre lands it on (0.1, 0.1)-(0.9, 0.9), so the
+#: re-issued drawing never leaves the same-size media box.
+RESCALED_CONTENT_REGION = (0.3, 0.3, 0.7, 0.7)
+
+
+def align_label_names(
+    prefix: str = "RM", count: int = ALIGN_LABEL_COUNT, start: int = 1
+) -> list[str]:
+    """Label strings ``RM-01`` .. ``RM-24``, zero padded to two digits."""
+    return [f"{prefix}-{n:02d}" for n in range(start, start + count)]
+
+
+def align_label_fractions(
+    index: int,
+    region: tuple[float, float, float, float] = ALIGN_CONTENT_REGION,
+    *,
+    variant: int = 0,
+) -> tuple[float, float]:
+    """The baseline origin (fx, fy) of label *index*, as sheet fractions.
+
+    Layout ``variant=0`` (the rich drawing pages) fills the content band with a
+    6 x 4 matrix, columns fastest: RM-01 sits bottom-left of the band, RM-06
+    bottom-right, RM-24 top-right. Label text is drawn with its baseline
+    origin exactly on the returned point, so downstream anchor code can
+    recover every label's expected position from :data:`ALIGN_LABEL_COLUMNS`,
+    :data:`ALIGN_LABEL_ROWS` and the band.
+
+    Layout ``variant=1`` (the S-101 alternative) uses a 4 x 4 matrix with the
+    same conventions, so its labels never share coordinates with layout 0.
+    """
+    rx0, ry0, rx1, ry1 = region
+    if variant == 0:
+        columns, rows = ALIGN_LABEL_COLUMNS, ALIGN_LABEL_ROWS
+        col = index % columns
+        row = index // columns
+    else:
+        columns = rows = 4
+        col = index % columns
+        row = index // columns
+    fx = rx0 + (col + 0.5) * (rx1 - rx0) / columns
+    fy = ry0 + (row + 0.5) * (ry1 - ry0) / rows
+    return fx, fy
+
+
+@dataclass(slots=True)
+class DrawingPageSpec:
+    """One rich, CAD-like page of the Phase 4 alignment fixtures.
+
+    Everything the drawing needs is explicit: its identity (drawing number,
+    revision, scale), the labels that will become text anchors, and the
+    geometry knobs that make one fixture case differ from another.
+    """
+
+    drawing_no: str = "A-101"
+    revision: str = "C"
+    scale: str = "1 : 100"
+    labels: tuple[str, ...] = field(default_factory=lambda: tuple(align_label_names()))
+    #: Extra annotation lines, stacked down the left edge of the content band.
+    content_lines: tuple[str, ...] = ()
+    #: Draw the fine grid/hatch lines. Off gives a bubble-free detail sheet.
+    grid: bool = True
+    circles: bool = True
+    #: 0 = the standard layout, 1 = the S-101 alternative (see the geometry
+    #: tables below: different grid treatment, rectangles and hatch zones).
+    variant: int = 0
+    #: The content band, as fractions of the sheet.
+    region: tuple[float, float, float, float] = ALIGN_CONTENT_REGION
+    label_size: float = 9.0
+    width: float = A1_WIDTH
+    height: float = A1_HEIGHT
+
+
+def drawing_page_spec(
+    content_lines: list[str] | None = None,
+    grid: bool = True,
+    **overrides: object,
+) -> DrawingPageSpec:
+    """Build a :class:`DrawingPageSpec` with the common knobs as keywords.
+
+    ``content_lines`` become annotation lines stacked down the left of the
+    content band; ``grid=False`` removes every fine line, hatch and circle.
+    Any other :class:`DrawingPageSpec` field may be passed as a keyword.
+    """
+    values: dict[str, object] = {
+        "content_lines": tuple(content_lines) if content_lines else (),
+        "grid": grid,
+    }
+    values.update(overrides)
+    return DrawingPageSpec(**values)
+
+
+def _op_text(x: float, y: float, size: float, text: str) -> str:
+    return f"BT /F1 {size:.1f} Tf {x:.2f} {y:.2f} Td ({_escape(text)}) Tj ET"
+
+
+def _op_line(x0: float, y0: float, x1: float, y1: float, width: float) -> str:
+    return f"{width:.2f} w {x0:.2f} {y0:.2f} m {x1:.2f} {y1:.2f} l S"
+
+
+def _op_rect(x: float, y: float, w: float, h: float, width: float) -> str:
+    return f"{width:.2f} w {x:.2f} {y:.2f} {w:.2f} {h:.2f} re S"
+
+
+def _op_circle(cx: float, cy: float, r: float, width: float) -> str:
+    """A circle as four cubic segments (no PDF arc operator needed)."""
+    k = 0.5522847498
+    ops = [f"{width:.2f} w {cx + r:.2f} {cy:.2f} m"]
+    for x1, y1, x2, y2, x3, y3 in (
+        (cx + r, cy + k * r, cx + k * r, cy + r, cx, cy + r),
+        (cx - k * r, cy + r, cx - r, cy + k * r, cx - r, cy),
+        (cx - r, cy - k * r, cx - k * r, cy - r, cx, cy - r),
+        (cx + k * r, cy - r, cx + r, cy - k * r, cx + r, cy),
+    ):
+        ops.append(f"{x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} {x3:.2f} {y3:.2f} c")
+    ops.append("S")
+    return "\n".join(ops)
+
+
+#: Region-local rectangles (u0, v0, u1, v1) of the standard layout.
+_VARIANT0_RECTS = (
+    (0.06, 0.06, 0.30, 0.24),
+    (0.44, 0.10, 0.62, 0.30),
+    (0.70, 0.06, 0.94, 0.20),
+    (0.08, 0.44, 0.24, 0.62),
+    (0.36, 0.40, 0.56, 0.58),
+    (0.64, 0.42, 0.92, 0.58),
+    (0.10, 0.72, 0.28, 0.92),
+    (0.50, 0.70, 0.68, 0.90),
+    (0.76, 0.68, 0.94, 0.88),
+)
+
+#: Region-local rectangles of the S-101 alternative; (u0, v0, u1, v1, filled).
+_VARIANT1_RECTS = (
+    (0.08, 0.08, 0.46, 0.30, False),
+    (0.60, 0.10, 0.94, 0.34, False),
+    (0.16, 0.10, 0.34, 0.28, True),  # a solid block: nowhere in the old sheet
+    (0.10, 0.50, 0.30, 0.72, False),
+    (0.44, 0.46, 0.64, 0.90, False),
+    (0.78, 0.56, 0.94, 0.74, False),
+    (0.44, 0.66, 0.60, 0.80, True),
+)
+
+#: Squares (region-local) that carry 45-degree hatching on the standard sheet.
+_VARIANT0_HATCH = ((0.055, 0.055, 0.295, 0.245), (0.77, 0.69, 0.935, 0.875))
+
+#: "Grid bubble" circles (region-local centres) on the standard sheet.
+_VARIANT0_CIRCLES = ((0.18, 0.94), (0.50, 0.94), (0.82, 0.94))
+
+
+def _hatch_ops(x0: float, y0: float, x1: float, y1: float, slope: int = 1) -> list[str]:
+    """Fine 45-degree lines filling the rectangle, slope +1 or -1."""
+    dx = x1 - x0
+    dy = y1 - y0
+    step = min(dx, dy) / 24.0
+    lines: list[str] = []
+    runs = int((dx + dy) / step) + 3
+    for m in range(runs):
+        start_x = x0 - dy + m * step
+        if start_x + dy <= x0 or start_x >= x1:
+            continue
+        sx = max(start_x, x0)
+        ex = min(start_x + dy, x1)
+        if slope == 1:
+            lines.append(_op_line(sx, y0 + (sx - start_x), ex, y0 + (ex - start_x), 0.18))
+        else:
+            lines.append(_op_line(sx, y1 - (sx - start_x), ex, y1 - (ex - start_x), 0.18))
+    return lines
+
+
+def _content_ops(spec: DrawingPageSpec) -> list[str]:
+    """The drawing proper: content band, fine lines, shapes and labels."""
+    w, h = spec.width, spec.height
+    rx0, ry0, rx1, ry1 = spec.region
+    x0, y0 = rx0 * w, ry0 * h
+    x1, y1 = rx1 * w, ry1 * h
+    cw, ch = x1 - x0, y1 - y0
+    ops: list[str] = [_op_rect(x0, y0, cw, ch, 0.5)]
+
+    if spec.grid:
+        if spec.variant == 0:
+            for i in range(1, 32):  # verticals every 1/32 of the band width
+                ops.append(_op_line(x0 + cw * i / 32, y0, x0 + cw * i / 32, y1, 0.18))
+            for j in range(1, 16):  # horizontals every 1/16 of the band height
+                ops.append(_op_line(x0, y0 + ch * j / 16, x1, y0 + ch * j / 16, 0.18))
+            for hx0, hy0, hx1, hy1 in _VARIANT0_HATCH:
+                ops.extend(_hatch_ops(x0 + hx0 * cw, y0 + hy0 * ch, x0 + hx1 * cw, y0 + hy1 * ch))
+            for hx0, hy0, hx1, hy1 in _VARIANT0_HATCH:
+                ops.extend(
+                    _hatch_ops(x0 + hx0 * cw, y0 + hy0 * ch, x0 + hx1 * cw, y0 + hy1 * ch, slope=-1)
+                )
+        else:
+            # The S-101 sheet: a dense 45-degree lattice over the whole band.
+            ops.extend(_hatch_ops(x0, y0, x1, y1))
+            ops.extend(_hatch_ops(x0, y0, x1, y1, slope=-1))
+
+    rects = _VARIANT1_RECTS if spec.variant == 1 else _VARIANT0_RECTS
+    for rect in rects:
+        if len(rect) == 5:
+            u0, v0, u1, v1, filled = rect
+        else:
+            u0, v0, u1, v1 = rect
+            filled = False
+        rx, ry = x0 + u0 * cw, y0 + v0 * ch
+        rw, rh = (u1 - u0) * cw, (v1 - v0) * ch
+        if filled:
+            ops.append(f"{rx:.2f} {ry:.2f} {rw:.2f} {rh:.2f} re f")
+        else:
+            ops.append(_op_rect(rx, ry, rw, rh, 0.6))
+
+    if spec.circles and spec.variant == 0:
+        radius = 0.0125 * w
+        for u, v in _VARIANT0_CIRCLES:
+            ops.append(_op_circle(x0 + u * cw, y0 + v * ch, radius, 0.5))
+
+    for index, label in enumerate(spec.labels):
+        fx, fy = align_label_fractions(index, spec.region, variant=spec.variant)
+        ops.append(_op_text(fx * w, fy * h, spec.label_size, label))
+
+    for index, line in enumerate(spec.content_lines):
+        fy = y1 - (index + 1) * 0.03 * h
+        if fy < y0 + 0.02 * h:
+            break
+        ops.append(_op_text(x0 + 8, fy, 8.0, line))
+    return ops
+
+
+def _sheet_furniture_ops(
+    width: float, height: float, drawing_no: str, revision: str, scale: str
+) -> list[str]:
+    """The sheet frame and the minimal bottom-right title block, in points.
+
+    Laid out like the real fixture: ``Drawing No.`` and ``Rev.`` labels with
+    their values *below* them, ``Scale`` with its value to the right. The
+    block is white-filled first so it reads cleanly when drawn over other
+    content (the rescaled re-issue does exactly that).
+    """
+    x0 = 0.70 * width
+    x1 = width - 20.0
+    y0 = 20.0
+    y1 = 0.12 * height
+    ops: list[str] = [f"0.8 w 20.00 20.00 {width - 40:.2f} {height - 40:.2f} re S"]
+
+    # White sheet behind the block, then the block border.
+    ops.append(f"1 g {x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f} re f 0 g")
+    ops.append(f"0.6 w {x0:.2f} {y0:.2f} {x1 - x0:.2f} {y1 - y0:.2f} re S")
+
+    divider_drawing = 0.845 * width
+    divider_rev = 0.955 * width
+    row_divider = 0.058 * height
+    ops.append(f"0.3 w {divider_drawing:.2f} {y0:.2f} {divider_drawing:.2f} {y1:.2f} S")
+    ops.append(f"0.3 w {divider_rev:.2f} {y0:.2f} {divider_rev:.2f} {y1:.2f} S")
+    ops.append(f"0.3 w {x0:.2f} {row_divider:.2f} {x1:.2f} {row_divider:.2f} S")
+
+    text_left = x0 + 0.01 * width
+    label_y = 0.096 * height
+    value_y = 0.078 * height
+    scale_y = 0.038 * height
+    rev_centre = (divider_drawing + divider_rev) / 2
+
+    ops.append(_op_text(text_left, label_y, 7.5, "Drawing No."))
+    ops.append(_op_text(rev_centre - 10, label_y, 7.5, "Rev."))
+    ops.append(_op_text(text_left, value_y, 11.0, drawing_no))
+    ops.append(_op_text(rev_centre - 4, value_y, 11.0, revision))
+    ops.append(_op_text(text_left, scale_y, 7.5, "Scale"))
+    ops.append(_op_text(text_left + 150, scale_y, 11.0, scale))
+    return ops
+
+
+def _drawing_ops(spec: DrawingPageSpec) -> list[str]:
+    ops = list(
+        _sheet_furniture_ops(spec.width, spec.height, spec.drawing_no, spec.revision, spec.scale)
+    )
+    ops.extend(_content_ops(spec))
+    return ops
+
+
+def _make_font(pdf: pikepdf.Pdf) -> pikepdf.Object:
+    return pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica,
+            Encoding=pikepdf.Name.WinAnsiEncoding,
+        )
+    )
+
+
+def write_drawing_pdf(
+    path: str | Path,
+    *,
+    drawing_no: str = "A-101",
+    revision: str = "C",
+    scale: str = "1 : 100",
+    labels: list[str] | None = None,
+    content_lines: list[str] | None = None,
+    grid: bool = True,
+    circles: bool = True,
+    variant: int = 0,
+    region: tuple[float, float, float, float] = ALIGN_CONTENT_REGION,
+    label_size: float = 9.0,
+    width: float = A1_WIDTH,
+    height: float = A1_HEIGHT,
+) -> Path:
+    """Write one rich drawing page and return its path.
+
+    The labels default to ``RM-01`` .. ``RM-24`` and are drawn with Helvetica
+    (base-14, WinAnsi, ASCII only), so pdfium extracts every label as text.
+    Like the rest of this module the page media box is centred on the origin;
+    all coordinates inside are sheet-local fractions. Deterministic for equal
+    arguments.
+    """
+    spec = DrawingPageSpec(
+        drawing_no=drawing_no,
+        revision=revision,
+        scale=scale,
+        labels=tuple(labels) if labels is not None else tuple(align_label_names()),
+        content_lines=tuple(content_lines) if content_lines else (),
+        grid=grid,
+        circles=circles,
+        variant=variant,
+        region=region,
+        label_size=label_size,
+        width=width,
+        height=height,
+    )
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    pdf = pikepdf.Pdf.new()
+    font = _make_font(pdf)
+    x0 = -width / 2
+    y0 = -height / 2
+    body = "\n".join(_drawing_ops(spec)).encode("latin-1")
+    stream = pdf.make_stream(f"q 1 0 0 1 {x0:.2f} {y0:.2f} cm\n".encode("latin-1") + body + b"\nQ")
+    page = pikepdf.Dictionary(
+        Type=pikepdf.Name.Page,
+        MediaBox=[x0, y0, x0 + width, y0 + height],
+        Resources=pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font)),
+        Contents=stream,
+    )
+    pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+
+    with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+        meta["pdf:Producer"] = "C-Quest test fixture"
+    pdf.save(target)
+    pdf.close()
+    return target
+
+
+def _num(value: float) -> str:
+    """A PDF number literal: no exponent, up to four decimals, no trailing zeros."""
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def wrap_content(
+    pdf_path: str | Path,
+    matrix6: tuple[float, float, float, float, float, float],
+    out_path: str | Path,
+    *,
+    resize_media: tuple[float, float] | None = None,
+) -> Path:
+    """Copy *pdf_path* to *out_path*, wrapping each page's content stream as
+    ``q <matrix6> cm <original ops> Q``.
+
+    ``matrix6`` is a PDF cm matrix ``(a, b, c, d, e, f)`` in user-space
+    points. The fixture pages use a media box centred on the origin, so the
+    page centre *is* the user-space origin: a pure translation shifts the
+    content along the sheet, and a rotation about the origin is a rotation
+    about the page centre. ``resize_media=(w, h)`` replaces the media box with
+    one of that size centred on the old box's centre. The output is
+    deterministic for equal inputs. Returns *out_path*.
+    """
+    src = Path(pdf_path)
+    target = Path(out_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    a, b, c, d, e, f = (_num(v) for v in matrix6)
+    prefix = f"q {a} {b} {c} {d} {e} {f} cm\n".encode("latin-1")
+
+    with pikepdf.open(src) as pdf:
+        for page in pdf.pages:
+            contents = page.obj.Contents
+            if isinstance(contents, pikepdf.Array):
+                parts = [stream.read_bytes() for stream in contents]
+            else:
+                parts = [contents.read_bytes()]
+            page.obj.Contents = pdf.make_stream(prefix + b"\n".join(parts) + b"\nQ")
+            if resize_media is not None:
+                new_w, new_h = resize_media
+                box = [float(v) for v in page.obj.MediaBox]
+                cx = (box[0] + box[2]) / 2
+                cy = (box[1] + box[3]) / 2
+                page.obj.MediaBox = pikepdf.Array(
+                    [cx - new_w / 2, cy - new_h / 2, cx + new_w / 2, cy + new_h / 2]
+                )
+        pdf.save(target)
+    return target
+
+
+def _append_content_ops(pdf_path: str | Path, out_path: str | Path, ops: list[str]) -> Path:
+    """Save *pdf_path* to *out_path* with extra operators after its content.
+
+    Used to put fresh sheet furniture (frame + title block) on top of a
+    wrapped page whose own furniture scaled or rotated off the sheet. The
+    output may be the input file itself (in-place append).
+    """
+    target = Path(out_path)
+    body = "\n".join(ops).encode("latin-1")
+    with pikepdf.open(Path(pdf_path), allow_overwriting_input=target == Path(pdf_path)) as pdf:
+        page = pdf.pages[0]
+        # The page's own content is written in sheet-local coordinates and
+        # translated by the media box's lower-left corner; the overlay ops
+        # (also sheet-local) need the same translation to land in the box.
+        box = [float(v) for v in page.obj.MediaBox]
+        overlay = f"q 1 0 0 1 {box[0]:.2f} {box[1]:.2f} cm\n".encode("latin-1") + body + b"\nQ"
+        contents = page.obj.Contents
+        if isinstance(contents, pikepdf.Array):
+            existing = b"\n".join(stream.read_bytes() for stream in contents)
+        else:
+            existing = contents.read_bytes()
+        page.obj.Contents = pdf.make_stream(existing + b"\n" + overlay)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        pdf.save(target)
+    return target
+
+
+def _image_only_pdf(
+    path: str | Path,
+    gray_pixels: bytes,
+    width_px: int,
+    height_px: int,
+    *,
+    width_pt: float,
+    height_pt: float,
+) -> Path:
+    """A full-page image PDF with no text layer, like a photocopied sheet."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    pdf = pikepdf.Pdf.new()
+    image = pdf.make_stream(zlib.compress(gray_pixels))
+    image.Type = pikepdf.Name.XObject
+    image.Subtype = pikepdf.Name.Image
+    image.Width = width_px
+    image.Height = height_px
+    image.ColorSpace = pikepdf.Name.DeviceGray
+    image.BitsPerComponent = 8
+    image.Filter = pikepdf.Name.FlateDecode
+
+    content = pdf.make_stream(
+        f"q {width_pt:.2f} 0 0 {height_pt:.2f} 0 0 cm /Im0 Do Q".encode("latin-1")
+    )
+    page = pikepdf.Dictionary(
+        Type=pikepdf.Name.Page,
+        MediaBox=[0, 0, width_pt, height_pt],
+        Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image)),
+        Contents=content,
+    )
+    pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+    pdf.save(target)
+    pdf.close()
+    return target
+
+
+def build_alignment_clean(root: str | Path) -> Path:
+    """`10_alignment/clean_pair`: identical sheets except one changed label.
+
+    The old sheet is A-101 Rev C with RM-01..RM-24. The new sheet is the same
+    drawing re-issued as Rev D with exactly one real change: label RM-07 is
+    now RM-70. Every other label, line and value keeps its position, so the
+    pair needs the identity transform. Returns *root* with old/ and new/.
+    """
+    root = Path(root)
+    old_dir = root / "old"
+    new_dir = root / "new"
+    write_drawing_pdf(old_dir / "A-101-RevC.pdf", drawing_no="A-101", revision="C")
+
+    labels = align_label_names()
+    labels[6] = "RM-70"  # index 6 is RM-07
+    write_drawing_pdf(new_dir / "A-101-RevD.pdf", drawing_no="A-101", revision="D", labels=labels)
+    return root
+
+
+def build_alignment_shifted(root: str | Path) -> Path:
+    """`10_alignment/shifted`: the same sheet, its content plotted 40 mm right.
+
+    The whole old content stream is wrapped in a cm translation of
+    +40 mm of paper (= 40 / 25.4 * 72 points) along the sheet's x axis; the
+    media box does not change. Returns *root* with old/ and new/.
+    """
+    root = Path(root)
+    shift_x = 40.0 / 25.4 * 72.0
+    old_pdf = write_drawing_pdf(root / "old" / "A-101-RevC.pdf", drawing_no="A-101", revision="C")
+    wrap_content(
+        old_pdf, (1.0, 0.0, 0.0, 1.0, shift_x, 0.0), root / "new" / "A-101-RevC-shifted.pdf"
+    )
+    return root
+
+
+def build_alignment_rescaled(root: str | Path) -> Path:
+    """`10_alignment/rescaled`: A-101 at 1:100 re-issued with content doubled.
+
+    The old sheet draws its content inside :data:`RESCALED_CONTENT_REGION`
+    (centred on the page); the new sheet is the same content scaled 2.0 about
+    the page centre on the same-size media box, re-labelled 1 : 50. Fresh
+    sheet furniture (frame + title block) is drawn on top because the old
+    furniture scaled off the sheet with the content. Returns *root*.
+    """
+    root = Path(root)
+    old_dir = root / "old"
+    new_dir = root / "new"
+    write_drawing_pdf(
+        old_dir / "A-101-RevC-1-100.pdf",
+        drawing_no="A-101",
+        revision="C",
+        scale="1 : 100",
+        region=RESCALED_CONTENT_REGION,
+    )
+    wrapped = wrap_content(
+        old_dir / "A-101-RevC-1-100.pdf",
+        (2.0, 0.0, 0.0, 2.0, 0.0, 0.0),
+        new_dir / "A-101-RevD-1-50.pdf",
+    )
+    furniture = _sheet_furniture_ops(A1_WIDTH, A1_HEIGHT, "A-101", "D", "1 : 50")
+    _append_content_ops(wrapped, new_dir / "A-101-RevD-1-50.pdf", furniture)
+    return root
+
+
+def build_alignment_rotated(root: str | Path) -> Path:
+    """`10_alignment/rotated`: the same sheet, its content rotated 90 degrees.
+
+    The whole old content stream is wrapped in a 90-degree rotation about the
+    page centre (the cm matrix ``(0 1 -1 0 0 0)`` in the centred media box);
+    the media box does not change, so content near the sheet corners clips,
+    as it would for a genuinely rotated re-issue. Returns *root*.
+    """
+    root = Path(root)
+    old_pdf = write_drawing_pdf(root / "old" / "A-101-RevC.pdf", drawing_no="A-101", revision="C")
+    wrap_content(
+        old_pdf, (0.0, 1.0, -1.0, 0.0, 0.0, 0.0), root / "new" / "A-101-RevC-rotated90.pdf"
+    )
+    return root
+
+
+def build_alignment_page_rotated(root: str | Path) -> Path:
+    """`10_alignment/page_rotated`: identical content, different /Rotate flag.
+
+    The new file is a byte-for-byte copy of the old drawing with the page's
+    ``/Rotate`` entry set to 90; every content operator is unchanged, so the
+    two renders come out equal once rotation-normalised. Returns *root*.
+    """
+    root = Path(root)
+    old_pdf = write_drawing_pdf(root / "old" / "A-101-RevC.pdf", drawing_no="A-101", revision="C")
+    new_pdf = root / "new" / "A-101-RevC-rotateflag90.pdf"
+    new_pdf.parent.mkdir(parents=True, exist_ok=True)
+    new_pdf.write_bytes(old_pdf.read_bytes())
+    with pikepdf.open(new_pdf, allow_overwriting_input=True) as pdf:
+        pdf.pages[0].Rotate = 90
+        pdf.save(new_pdf)
+    return root
+
+
+def build_alignment_scanned(root: str | Path) -> Path:
+    """`10_alignment/scanned`: the old sheet printed out and scanned back in.
+
+    The old side is a normal A3 drawing page. The new side is that page
+    rendered at ~150 dpi by pdfium, rotated 0.8 degrees with cv2 (white
+    borders left by the rotation) and embedded full-page into a new PDF that
+    has no text layer at all.
+    """
+    root = Path(root)
+    old_pdf = write_drawing_pdf(
+        root / "old" / "A-101-RevC.pdf",
+        drawing_no="A-101",
+        revision="C",
+        width=A3_WIDTH,
+        height=A3_HEIGHT,
+    )
+
+    import cv2
+
+    from engine.utils.pdf_runtime import open_document
+
+    with open_document(old_pdf) as document:
+        bitmap = document[0].render(scale=150.0 / 72.0)
+        pixels = bitmap.to_numpy()
+    if pixels.ndim == 2:
+        gray = pixels
+    elif pixels.shape[2] == 3:
+        gray = cv2.cvtColor(pixels, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = cv2.cvtColor(pixels, cv2.COLOR_BGRA2GRAY)
+
+    rows, cols = gray.shape
+    matrix = cv2.getRotationMatrix2D((cols / 2, rows / 2), 0.8, 1.0)
+    skewed = cv2.warpAffine(
+        gray,
+        matrix,
+        (cols, rows),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=255,
+    )
+    _image_only_pdf(
+        root / "new" / "A-101-RevC-scanned.pdf",
+        skewed.tobytes(),
+        cols,
+        rows,
+        width_pt=A3_WIDTH,
+        height_pt=A3_HEIGHT,
+    )
+    return root
+
+
+def build_alignment_no_grid(root: str | Path) -> Path:
+    """`10_alignment/no_grid`: a detail sheet with no grid, hatch or circles.
+
+    Both sides are the identical drawing: labels and rectangles only, nothing
+    a grid-bubble detector could mistake for a bubble. Returns *root*.
+    """
+    root = Path(root)
+    pdf = write_drawing_pdf(
+        root / "old" / "A-101-RevC.pdf",
+        drawing_no="A-101",
+        revision="C",
+        grid=False,
+        circles=False,
+    )
+    new_pdf = root / "new" / "A-101-RevC.pdf"
+    new_pdf.parent.mkdir(parents=True, exist_ok=True)
+    new_pdf.write_bytes(pdf.read_bytes())
+    return root
+
+
+def build_alignment_sparse_text(root: str | Path) -> Path:
+    """`10_alignment/sparse_text`: a geometry-heavy sheet with almost no text.
+
+    Grid, hatch and rectangles, but only three tiny labels (K1, K2, K3) plus
+    the title block, so text-anchor matching cannot work alone. Both sides
+    carry the same drawing (Rev C vs Rev D re-issue). Returns *root*.
+    """
+    root = Path(root)
+    write_drawing_pdf(
+        root / "old" / "A-101-RevC.pdf",
+        drawing_no="A-101",
+        revision="C",
+        labels=["K1", "K2", "K3"],
+        label_size=5.0,
+        circles=False,
+    )
+    write_drawing_pdf(
+        root / "new" / "A-101-RevD.pdf",
+        drawing_no="A-101",
+        revision="D",
+        labels=["K1", "K2", "K3"],
+        label_size=5.0,
+        circles=False,
+    )
+    return root
+
+
+def build_alignment_impossible(root: str | Path) -> Path:
+    """`10_alignment/impossible`: two genuinely different drawings.
+
+    The old sheet is A-101 with the RM label set, grid, hatch and circles;
+    the new sheet is a different drawing: S-101, an alternative label set
+    (``SEC-A1``..``SEC-A16`` on a different matrix), a solid block, a dense
+    45-degree lattice instead of the grid and no circles. No alignment of the
+    pair deserves to pass the quality gate. Returns *root*.
+    """
+    root = Path(root)
+    old_dir = root / "old"
+    new_dir = root / "new"
+
+    write_drawing_pdf(old_dir / "A-101-RevC.pdf", drawing_no="A-101", revision="C")
+
+    sec_labels = [f"SEC-A{n}" for n in range(1, 17)]
+    write_drawing_pdf(
+        new_dir / "S-101-RevA.pdf",
+        drawing_no="S-101",
+        revision="A",
+        scale="1 : 100",
+        labels=sec_labels,
+        circles=False,
+        variant=1,
+    )
+    return root
+
+
+#: The nine `10_alignment` cases: (folder name under 10_alignment, builder).
+ALIGNMENT_CASES = (
+    ("clean_pair", build_alignment_clean),
+    ("shifted", build_alignment_shifted),
+    ("rescaled", build_alignment_rescaled),
+    ("rotated", build_alignment_rotated),
+    ("page_rotated", build_alignment_page_rotated),
+    ("scanned", build_alignment_scanned),
+    ("no_grid", build_alignment_no_grid),
+    ("sparse_text", build_alignment_sparse_text),
+    ("impossible", build_alignment_impossible),
+)
