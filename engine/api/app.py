@@ -31,6 +31,7 @@ from engine.api import (
     routes_register,
     routes_report,
     routes_system,
+    routes_tiles,
     ws_progress,
 )
 from engine.core.events import shutdown_requested
@@ -193,6 +194,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_register.router)
     app.include_router(routes_report.router)
     app.include_router(routes_naming.router)
+    app.include_router(routes_tiles.router)
     app.include_router(ws_progress.router)
 
     # The SPA fallback claims `/{path}`, so it must be mounted last.
