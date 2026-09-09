@@ -318,6 +318,32 @@ export interface MatchDecisionsResponse {
   unresolved_review: number;
 }
 
+// ── Tiles (Phase 4 lightbox viewer) ────────────────────────────────────
+
+/** One resolution level of a rendered sheet's tile pyramid. */
+export interface TileLevel {
+  level: number;
+  /** Tiles across the sheet at this level (level 0 is the single-tile thumbnail). */
+  cols: number;
+  rows: number;
+  tile_count: number;
+}
+
+/** Manifest of a rendered sheet: the levels the viewer may ask for. */
+export interface TileManifest {
+  /** Opaque sheet identifier issued by the engine — never derived in the UI. */
+  sheet_id: string;
+  /** Resolution the sheet was rendered at, in dots per inch (default 200). */
+  dpi: number;
+  /** Full-resolution sheet size in pixels. */
+  width_px: number;
+  height_px: number;
+  /** Levels in ascending order, from the coarse thumbnail up to full size. */
+  levels: TileLevel[];
+  /** Edge length of one tile in pixels (right and bottom edge tiles clip). */
+  tile_size: number;
+}
+
 // ── Rename ─────────────────────────────────────────────────────────────
 
 /** Where a rename writes its result: a copy or the file itself. */

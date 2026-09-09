@@ -31,6 +31,7 @@ import type {
   SheetProfileOption,
   SheetRow,
   SideState,
+  TileManifest,
 } from './types';
 import { getApiPort, waitForBridge } from '../lib/native';
 
@@ -57,8 +58,10 @@ export class ApiError extends Error {
 }
 
 let basePromise: Promise<string> | null = null;
+/** The base once any request has resolved it; null until then. */
+let resolvedBase: string | null = null;
 
-async function resolveBase(): Promise<string> {
+async function resolveBaseOnce(): Promise<string> {
   const configured = import.meta.env.VITE_API_BASE;
   if (typeof configured === 'string' && configured.length > 0) {
     return configured.replace(/\/$/, '');
@@ -76,15 +79,33 @@ async function resolveBase(): Promise<string> {
   return DEV_FALLBACK_BASE;
 }
 
+async function resolveBase(): Promise<string> {
+  basePromise ??= resolveBaseOnce().then((base) => {
+    resolvedBase = base;
+    return base;
+  });
+  return basePromise;
+}
+
 /** The engine's base URL, resolved once per session. */
 export function apiBase(): Promise<string> {
-  basePromise ??= resolveBase();
-  return basePromise;
+  return resolveBase();
+}
+
+/**
+ * The resolved engine base, or null before the first request finished.
+ * URL builders that must stay synchronous (tile URLs) use this; callers
+ * fetch a manifest first, which resolves the base, so the null window
+ * never matters in practice.
+ */
+export function apiBaseSync(): string | null {
+  return resolvedBase;
 }
 
 /** Forget the cached base URL. Used by tests and after a reconnect. */
 export function resetApiBase(): void {
   basePromise = null;
+  resolvedBase = null;
 }
 
 function isErrorResponse(value: unknown): value is ErrorResponse {
@@ -346,4 +367,66 @@ export function cancelRename(): Promise<{ cancelled: boolean }> {
 /** Reverse the last apply run, verifying each file's hash first. */
 export function undoRename(): Promise<{ run_id: string }> {
   return post<{ run_id: string }>('/api/rename/undo');
+}
+
+// ── Tiles ──────────────────────────────────────────────────────────────
+
+/** One tile's path. `sheet_id` is opaque, so it must be escaped for a URL. */
+function tilePath(sheetId: string, level: number, x: number, y: number): string {
+  return `/api/tiles/${encodeURIComponent(sheetId)}/${level}/${x}/${y}.png`;
+}
+
+/** What tile levels exist for one rendered sheet. */
+export function fetchTileManifest(sheetId: string): Promise<TileManifest> {
+  return get<TileManifest>(`/api/tiles/${encodeURIComponent(sheetId)}/manifest`);
+}
+
+/**
+ * The URL of one tile, for image loading and as a cache key — no fetch.
+ *
+ * Synchronous because the tile loader builds lists of visible tiles without
+ * awaiting anything. The base URL is only known after the first API request
+ * of the session, but the loader always fetches the manifest first, which
+ * resolves it, so the bare relative fallback below never leaks out there.
+ */
+export function tileUrl(sheetId: string, level: number, x: number, y: number): string {
+  const path = tilePath(sheetId, level, x, y);
+  const base = apiBaseSync();
+  return base === null ? path : `${base}${path}`;
+}
+
+/**
+ * Download one tile as a PNG blob with the same error handling as `request`.
+ * `signal` lets the tile loader cancel stale work; an abort is not an error.
+ */
+export async function fetchTileBlob(
+  sheetId: string,
+  level: number,
+  x: number,
+  y: number,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const base = await apiBase();
+  const url = `${base}${tilePath(sheetId, level, x, y)}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      signal,
+      headers: { Accept: 'image/png' },
+    });
+  } catch (cause) {
+    // An abort means the caller cancelled stale work, never an engine fault.
+    if (signal?.aborted) throw cause;
+    throw new ApiError(
+      'engine_unreachable',
+      'The engine is not responding. Close the application and start it again.',
+      0,
+      { url, cause: String(cause) },
+    );
+  }
+
+  if (!response.ok) throw await toApiError(response);
+  return response.blob();
 }

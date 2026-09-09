@@ -1,0 +1,85 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Lightbox — the drawing viewer.
+
+   The design idea of the whole application applies here hardest: the room
+   is dark (--room-900) and the sheet is the only bright thing (--sheet).
+   Everything drawn on top of the canvas — minimap, zoom readout, fallback
+   note — is small chrome in the room palette and never covers the drawing.
+   No colours outside the tokens; no brand red inside the canvas area.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.lightbox {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  background: var(--room-900);
+  font-size: var(--text-micro);
+}
+
+/* The focus ring belongs to the chrome at the component edge, not the
+   drawing itself. */
+.lightbox:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+.lightbox__stage {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+  touch-action: none; /* pan and pinch are handled here, never by the page */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lightbox__stage canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+.lightbox__minimap {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 168px;
+  height: 126px;
+  background: var(--room-700);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-raised);
+  pointer-events: none;
+  z-index: var(--z-overlay);
+}
+
+.lightbox__scale {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--room-700);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  color: var(--text-mid);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: var(--z-overlay);
+}
+
+.lightbox__fallback-note {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  max-width: min(440px, calc(100% - var(--space-6)));
+  padding: var(--space-2) var(--space-3);
+  background: var(--room-700);
+  opacity: 0.92;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  color: var(--text-mid);
+  pointer-events: none;
+  z-index: var(--z-overlay);
+}
