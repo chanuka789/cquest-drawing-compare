@@ -56,6 +56,11 @@ def _sheet_id(abs_path: str, page_index: int) -> str:
     return digest.hexdigest()[:16]
 
 
+def sheet_id(abs_path: str, page_index: int) -> str:
+    """Public form of :func:`_sheet_id`, for sibling routers and the UI."""
+    return _sheet_id(abs_path, page_index)
+
+
 def _sheet_index(session: ComparisonSession) -> dict[str, tuple[str, int]] | None:
     """``{sheet_id: (abs_path, page_index)}`` over both sides of *session*.
 

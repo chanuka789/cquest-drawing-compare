@@ -138,6 +138,8 @@ class ComparisonSession:
         }
         self.align_results: list[object] = []
         self._align_cancel = CancelToken()
+        #: (old, new) sheet references the current run was built from.
+        self._align_pair_refs: list[tuple[object, object]] = []
 
     # -- sides ---------------------------------------------------------
 
@@ -705,6 +707,7 @@ class ComparisonSession:
             )
 
         refs = [(ref(old), ref(new)) for old, new in pairs]
+        self._align_pair_refs = list(refs)
 
         def work() -> None:
             from engine.align.orchestrator import align_batch

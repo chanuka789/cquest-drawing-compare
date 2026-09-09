@@ -48,14 +48,35 @@ def _matrix_to_list(matrix: Any) -> list[list[float]] | None:
 
 @router.get("/align/results", summary="The alignment results once the run is done")
 def alignment_results() -> dict[str, Any]:
+    from pathlib import Path
+
+    from engine.api.routes_tiles import sheet_id as tile_sheet_id
+
     session = get_session()
     if session.align_run["state"] != "done":
         raise ValidationError("Alignment has not finished yet. Check its status first.")
+    refs = list(session._align_pair_refs)
     rows: list[dict[str, Any]] = []
-    for item in session.align_results:
+    for index, item in enumerate(session.align_results):
         assessment = getattr(item, "assessment", None)
+        old_ref = refs[index][0] if index < len(refs) else None
+        new_ref = refs[index][1] if index < len(refs) else None
+        old_path = getattr(old_ref, "abs_path", "")
+        new_path = getattr(new_ref, "abs_path", "")
         rows.append(
             {
+                "old": {
+                    "filename": Path(old_path).name,
+                    "sheet_id": tile_sheet_id(old_path, int(getattr(old_ref, "page_index", 0)))
+                    if old_path
+                    else None,
+                },
+                "new": {
+                    "filename": Path(new_path).name,
+                    "sheet_id": tile_sheet_id(new_path, int(getattr(new_ref, "page_index", 0)))
+                    if new_path
+                    else None,
+                },
                 "verdict": str(getattr(item, "verdict", "failed")),
                 "method": str(getattr(item, "method", "")),
                 "note": getattr(item, "note", ""),
