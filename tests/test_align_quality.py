@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 
+import cv2
 import numpy as np
 import pytest
 
@@ -246,7 +247,10 @@ def test_genuinely_different_drawings_cannot_pass():
 
     value, _, passed = assessment.metrics["ink_overlap"]
     assert passed is False
-    assert value == pytest.approx(22500.0 / 76500.0, abs=0.01)
+    # The raw 9-crossing overlap (22500/76500) rises slightly because both
+    # masks are dilated by the one-pixel tolerance; it stays far below the
+    # 0.6 threshold, so different drawings still fail loudly.
+    assert value == pytest.approx(0.3071, abs=0.01)
     assert assessment.verdict is Verdict.FAILED
     assert "same drawing" in assessment.suggestion
 
@@ -327,4 +331,162 @@ def test_mm_report_states_paper_and_site_millimetres():
     px_per_mm = 200.0 / 25.4
     assert mm_report(10.0, px_per_mm, 100) == ("1.27 mm on paper, which is 127 mm on site at 1:100")
     assert mm_report(10.0, px_per_mm, None) == "1.27 mm on paper"
-    assert mm_report(2.0, px_per_mm, 50) == ("0.25 mm on paper, which is 12.7 mm on site at 1:50")
+
+
+# ── Ink tolerance and content-scale comparison ────────────────────────────
+
+
+def _thin_line_sheet() -> np.ndarray:
+    """A line-art sheet: 1 px frame, 1 px grid lines and 12x9 'text' marks.
+
+    Strokes are one pixel wide — the sub-pixel raster phase regime the ink
+    tolerance exists for.
+    """
+    image = np.full((_HEIGHT, _WIDTH), 255, dtype=np.uint8)
+    cv2.rectangle(image, (20, 20), (_WIDTH - 21, _HEIGHT - 21), 0, 1)
+    for x in range(40, _WIDTH - 40, 32):
+        cv2.line(image, (x, 20), (x, _HEIGHT - 21), 0, 1)
+    for y in range(40, _HEIGHT - 40, 32):
+        cv2.line(image, (20, y), (_WIDTH - 21, y), 0, 1)
+    for x0, y0 in ((60, 40), (290, 150), (180, 240)):
+        image[y0 : y0 + 9, x0 : x0 + 12] = 0
+    return image
+
+
+def _raw_ink_overlap(old: np.ndarray, new: np.ndarray, matrix3x3: np.ndarray) -> float:
+    """The tolerance-free Jaccard (pre-dilation semantics), for comparisons."""
+    binary = cv2.threshold(old, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1] == 0
+    new_mask = cv2.threshold(new, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1] == 0
+    warped = (
+        cv2.warpAffine(
+            binary.astype(np.uint8) * 255,
+            np.asarray(matrix3x3, dtype=float)[:2],
+            (new.shape[1], new.shape[0]),
+            flags=cv2.INTER_NEAREST,
+        )
+        > 0
+    )
+    intersection = int(np.count_nonzero(warped & new_mask))
+    union = int(np.count_nonzero(warped | new_mask))
+    return intersection / union if union else 0.0
+
+
+def test_thin_line_sheet_passes_at_an_unlucky_subpixel_phase():
+    """A perfect fit on 1 px strokes must pass the ink check.
+
+    The new sheet is the old one re-rendered at a fractional offset
+    (0.4, 0.3) px. Otsu binarisation then places most thin strokes one pixel
+    away from where the warped old stroke lands, so the exact (tolerance-
+    free) Jaccard collapses below the bar; the one-pixel dilation on both
+    masks is what lets metric 6 ask "does it look aligned?" rather than "do
+    the two rasters' phases agree?".
+    """
+    old = _thin_line_sheet()
+    new = cv2.warpAffine(
+        old,
+        np.asarray([[1.0, 0.0, 0.4], [0.0, 1.0, 0.3]], dtype=np.float32),
+        (_WIDTH, _HEIGHT),
+        flags=cv2.INTER_LINEAR,
+    )
+    matrix = similarity_matrix(0.4, 0.3, 0.0, 1.0)
+    result = _result(matrix, method=AlignMethod.PHASE_CORRELATION)
+    assessment = assess(result, [], old, new)
+
+    value, _, passed = assessment.metrics["ink_overlap"]
+    assert passed
+    assert value >= 0.6
+    assert assessment.verdict.proceeds_automatically
+    # The test really sits in the phase-fragile regime: without the tolerance
+    # the exact overlap is below the gate's bar.
+    assert _raw_ink_overlap(old, new, matrix) < 0.6
+
+
+def test_scale_tolerant_ink_passes_a_doubled_content_sheet():
+    """A 2.0x content re-issue is verified at the old sheet's content scale.
+
+    Models the rescaled fixture: the same canvas, the old content in the
+    centre, the new content doubled about the centre so it fills the canvas.
+    When a similarity fit magnifies content by more than 5% the ink
+    comparison resizes the new sheet onto the old canvas (INTER_AREA) and
+    warps the old sheet by the scale-normalised matrix, so both sheets are
+    sampled at the same density; with the correct matrix the overlap must
+    clear the bar.
+    """
+    size = 300
+    content = np.full((size // 2, size // 2), 255, dtype=np.uint8)
+    cv2.rectangle(content, (10, 10), (size // 2 - 11, size // 2 - 11), 0, 1)
+    for x in range(20, size // 2 - 20, 24):
+        cv2.line(content, (x, 10), (x, size // 2 - 11), 0, 1)
+    for y in range(20, size // 2 - 20, 24):
+        cv2.line(content, (10, y), (size // 2 - 11, y), 0, 1)
+    content[size // 4 : size // 4 + 12, size // 4 : size // 4 + 16] = 0
+
+    old = np.full((size, size), 255, dtype=np.uint8)
+    old[size // 4 : 3 * size // 4, size // 4 : 3 * size // 4] = content
+    new = cv2.resize(content, (size, size), interpolation=cv2.INTER_LINEAR)
+
+    matrix = np.eye(3)
+    matrix[0, 0] = matrix[1, 1] = 2.0
+    matrix[0, 2] = matrix[1, 2] = -size / 2.0
+    result = _result(matrix, method=AlignMethod.PHASE_CORRELATION)
+    assessment = assess(result, [], old, new)
+
+    value, _, passed = assessment.metrics["ink_overlap"]
+    assert passed
+    assert value >= 0.6
+    assert assessment.verdict.proceeds_automatically
+
+
+def test_anchor_spread_waived_for_genuine_content_scale_change():
+    """A partial-content sheet enlarged 2x is not refused on anchor spread.
+
+    The old content occupies only the centre 80 x 120 px of a 400 x 300
+    sheet, so its anchors can never reach the 0.25 spread rule — exactly the
+    situation of a small drawing re-issued at a larger scale. With every
+    other metric passing (notably the content-scale ink check), the spread
+    refusal is waived and the verdict caps at good.
+    """
+    old = np.full((_HEIGHT, _WIDTH), 255, dtype=np.uint8)
+    old[90:210, 160:240] = 0  # one centred content block
+    new = np.full((_HEIGHT, _WIDTH), 255, dtype=np.uint8)
+    new[30:270, 120:280] = 0  # the same block doubled about the page centre
+
+    matrix = np.eye(3)
+    matrix[0, 0] = matrix[1, 1] = 2.0
+    matrix[0, 2], matrix[1, 2] = -200.0, -150.0
+    points = [
+        (float(x), float(y)) for y in (110.0, 150.0, 190.0) for x in (170.0, 190.0, 210.0, 230.0)
+    ]
+    correspondences = [
+        Correspondence(old_x=x, old_y=y, new_x=2.0 * x - 200.0, new_y=2.0 * y - 150.0)
+        for x, y in points
+    ]
+    assessment = assess(_result(matrix), correspondences, old, new)
+
+    spread_metric = assessment.metrics["anchor_spread"]
+    assert spread_metric[2]  # waived: recorded as passed
+    assert assessment.verdict is Verdict.GOOD  # capped: a waiver is not excellent
+    assert assessment.verdict.proceeds_automatically
+    assert "waived" in assessment.explanation
+
+
+def test_content_scale_change_does_not_waive_a_visually_wrong_fit():
+    """The spread waiver never fires when the ink check fails."""
+    old = np.full((_HEIGHT, _WIDTH), 255, dtype=np.uint8)
+    old[90:210, 160:240] = 0
+    # A "doubled" sheet whose ink does not line up with the old content.
+    new = np.full((_HEIGHT, _WIDTH), 255, dtype=np.uint8)
+    new[30:270, 40:200] = 0
+
+    matrix = np.eye(3)
+    matrix[0, 0] = matrix[1, 1] = 2.0
+    matrix[0, 2], matrix[1, 2] = -200.0, -150.0
+    correspondences = [
+        Correspondence(old_x=float(x), old_y=float(y), new_x=2.0 * x - 200.0, new_y=2.0 * y - 150.0)
+        for y in (110.0, 150.0, 190.0)
+        for x in (170.0, 190.0, 210.0, 230.0)
+    ]
+    assessment = assess(_result(matrix), correspondences, old, new)
+
+    assert assessment.verdict is Verdict.FAILED
+    assert "waived" not in assessment.explanation

@@ -16,6 +16,27 @@ alignment). The gate never silently downgrades: an empty correspondence set
 or a NaN/inf transform matrix always returns ``failed`` no matter what the
 metric numbers claim.
 
+Two deliberate measurement choices, documented here because they change what
+"ink overlap" and "anchor spread" mean in edge cases:
+
+* **Ink overlap tolerates a one-pixel smear and compares at matched content
+  scale.** Vector strokes at 0.18-0.6 pt are only ~0.25-0.85 px wide at
+  100-200 DPI; two renders of the *same* lines can disagree about which side
+  of a half-pixel boundary each stroke lands on, so a pixel-exact Jaccard
+  would refuse a perfect fit at an unlucky raster phase. Both masks are
+  dilated by one pixel first, and when a similarity fit magnifies the
+  content by more than 5% the comparison is done at the old sheet's content
+  scale (the new sheet resized onto the old canvas) instead of on the new
+  canvas. See :func:`_measure_ink_overlap`.
+* **Anchor spread is waived for genuine content-scale changes.** A small
+  drawing enlarged between issues legitimately occupies only part of its old
+  canvas, so its anchors cannot reach the 0.25 spread rule no matter how
+  well they cover the content. When every other metric passes — including
+  the scale-matched ink check over all the content that exists — such a
+  spread refusal is waived and the verdict caps at ``good``. The corner-
+  cluster pathology the metric guards against cannot hide here, because the
+  ink check still covers the whole sheet.
+
 Pixels are internal; everything user-facing here is millimetres on paper,
 converted to site millimetres when the drawing scale is known. The prose
 helpers (:func:`mm_report`, the failure lines) are the ones the orchestrator
@@ -164,6 +185,116 @@ def _dark_mask(image: np.ndarray) -> NDArray[np.bool_]:
     return binary == 0
 
 
+#: One-pixel ink tolerance: both binarised sheets are dilated once with this
+#: kernel before the ink Jaccard. Vector strokes at 0.18-0.6 pt are only
+#: ~0.25-0.85 px wide at 100-200 DPI, so two renders of the *same* lines can
+#: legitimately disagree about which side of a half-pixel boundary each
+#: stroke lands on; at an unlucky raster phase an exact transform would then
+#: leave half the thin strokes one pixel apart and score below the overlap
+#: threshold even though the sheets are perfectly aligned. Metric 6 asks the
+#: question a human would ask — does it look aligned? (plan B6) — so it
+#: tolerates a one-pixel smear: the Jaccard is computed on the dilated masks,
+#: which is also the tolerance ECC's sub-pixel refinement is working toward.
+#: Fits that are off by more than about a pixel still fail outright (a 2 px
+#: shift leaves only a sliver of dilated overlap).
+_INK_TOLERANCE_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+#: A fitted uniform scale outside about 0.951x-1.051x (|ln scale| > 0.05)
+#: counts as a genuine content-scale change between the two issues, which
+#: activates the scale-tolerant ink comparison (see :func:`_measure_ink_overlap`)
+#: and the anchor-spread waiver for such pairs (see :func:`assess`).
+CONTENT_SCALE_LOG_TOLERANCE = 0.05
+
+
+def _dilated_ink_mask(image: np.ndarray) -> NDArray[np.uint8]:
+    """Otsu ink mask (255 = ink) dilated by the one-pixel tolerance kernel."""
+    binary = _dark_mask(image).astype(np.uint8) * np.uint8(255)
+    return cv2.dilate(binary, _INK_TOLERANCE_KERNEL)
+
+
+def _measure_ink_overlap(
+    matrix3x3: NDArray[np.float64],
+    old_img: np.ndarray,
+    new_img: np.ndarray,
+    model: TransformModel,
+) -> float:
+    """Jaccard of the dilated dark masks after warping the old sheet's ink.
+
+    Warps the binarised (and dilated) old sheet onto the target canvas and
+    counts the fraction of inked pixels that coincide with the new sheet's
+    dilated ink — with the one-pixel tolerance described above.
+
+    **Scale-tolerant path.** When the fitted transform magnifies the old
+    content by more than 5% (uniform scale from the matrix, similarity
+    model, enlargement only) the plain comparison breaks for a reason that
+    has nothing to do with alignment quality: warping a binarised 1 px
+    stroke up by 2 resamples it to 2 px blocks on an even lattice, while the
+    new sheet's own rendering of the same (magnified) vector stroke lives on
+    a phase-shifted lattice — so even a *perfect* transform underlaps. Both
+    sheets are then compared on the *old* canvas at the old content scale:
+    the old sheet stays in place, and the new sheet is mapped into the old
+    canvas by the inverse of the fitted transform — first downsampled by
+    ``1/scale`` with ``cv2.resize`` (INTER_AREA, so the magnification is
+    removed by proper area averaging rather than by lattice decimation),
+    then rotated back by the fitted rotation and translated by the inverse's
+    translation. Both sheets are then sampled at the same density and their
+    strokes live on the same raster lattice, so the Jaccard measures what
+    it should. (The reverse direction — a zoomed-out re-issue — keeps the
+    new-canvas comparison and is therefore judged more strictly; no fixture
+    exercises it yet.)
+    """
+    matrix = np.asarray(matrix3x3, dtype=float)
+    old_h, old_w = old_img.shape[:2]
+    new_h, new_w = new_img.shape[:2]
+    uniform_scale = math.sqrt(abs(float(np.linalg.det(matrix[:2, :2]))))
+    at_content_scale = (
+        model is TransformModel.SIMILARITY
+        and math.isfinite(uniform_scale)
+        and uniform_scale > 1.0
+        and math.log(uniform_scale) > CONTENT_SCALE_LOG_TOLERANCE
+    )
+    if at_content_scale:
+        inverse = cv2.invertAffineTransform(matrix[:2].astype(np.float64))
+        downsampled = cv2.resize(
+            new_img,
+            None,
+            fx=1.0 / uniform_scale,
+            fy=1.0 / uniform_scale,
+            interpolation=cv2.INTER_AREA,
+        )
+        # x_old = R^T x_new/s - (R^T t)/s: on the downsampled grid x_new ~= s*u
+        # the rotation is the inverse's linear part times the scale, and the
+        # translation is the inverse's translation verbatim.
+        onto_old = np.zeros((2, 3), dtype=np.float64)
+        onto_old[:, :2] = inverse[:, :2] * uniform_scale
+        onto_old[:, 2] = inverse[:, 2]
+        new_on_old = cv2.warpAffine(
+            downsampled,
+            onto_old,
+            (old_w, old_h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=255,
+        )
+        old_binary = _dilated_ink_mask(old_img)
+        new_binary = _dilated_ink_mask(new_on_old)
+        intersection = int(np.count_nonzero((old_binary > 0) & (new_binary > 0)))
+        union = int(np.count_nonzero((old_binary > 0) | (new_binary > 0)))
+        return intersection / union if union else 0.0
+
+    warped = cv2.warpAffine(
+        _dilated_ink_mask(old_img),
+        matrix[:2, :],
+        (new_w, new_h),
+        flags=cv2.INTER_NEAREST,
+    )
+    warped_mask = warped > 0
+    new_mask = _dilated_ink_mask(new_img) > 0
+    intersection = int(np.count_nonzero(warped_mask & new_mask))
+    union = int(np.count_nonzero(warped_mask | new_mask))
+    return intersection / union if union else 0.0
+
+
 # ── The gate ──────────────────────────────────────────────────────────────
 
 
@@ -192,12 +323,22 @@ def assess(
        (``config.good_anchors``) gates the excellent verdict.
     #. ``anchor_spread`` — convex-hull fraction of the *old* anchor points
        against the old image area, via ``anchors.assess_anchor_quality``.
+       Waived (with the verdict capped at ``good``) when every other metric
+       passes for a similarity fit whose sheets genuinely differ in content
+       scale: the old drawing then legitimately occupies only part of its
+       canvas, so its anchors cannot span the page (see the spread-waiver
+       note in :func:`assess`).
     #. ``transform_sanity`` — :func:`transform.validate_transform` (scale
        range, no mirror, near-axis rotation for CAD sheets, no shear);
        ``1.0`` when believable, else ``0.0``.
-    #. ``ink_overlap`` — Jaccard index over dark pixels after warping the
-       binarised old image onto the new canvas. The only metric that asks
-       whether it actually looks aligned.
+    #. ``ink_overlap`` — Jaccard over dark pixels after warping the
+       binarised old sheet onto the target canvas, with a one-pixel
+       tolerance (both masks dilated) so sub-pixel raster phases of thin
+       vector strokes cannot fail a perfect fit. When the fitted similarity
+       magnifies the content by more than 5% the comparison happens at the
+       old sheet's content scale instead (both sheets resampled onto one
+       canvas at the same density); see :func:`_measure_ink_overlap`. The
+       only metric that asks whether it actually looks aligned.
     #. ``holdout_rms`` — mean held-out RMS from ``cross_validate``. Below
        ``config.min_anchors + 2`` correspondences the metric is *failed* by
        rule (too few to hold anything out), never skipped.
@@ -302,21 +443,20 @@ def assess(
         reason="; ".join(sanity_reasons),
     )
 
-    # 6. Post-warp ink overlap — the visual question.
-    old_mask = _dark_mask(old_img)
-    new_mask = _dark_mask(new_img)
+    # The uniform scale the fit claims, read from the real matrix: used by
+    # the ink metric's content-scale comparison and by the spread waiver.
+    uniform_scale = math.sqrt(abs(float(np.linalg.det(matrix)))) if matrix_usable else float("nan")
+    content_scale_change = (
+        math.isfinite(uniform_scale)
+        and uniform_scale > 0.0
+        and abs(math.log(uniform_scale)) > CONTENT_SCALE_LOG_TOLERANCE
+    )
+
+    # 6. Post-warp ink overlap — the visual question. Measured with the
+    #    one-pixel tolerance and, for genuine content-scale changes, at the
+    #    old sheet's content scale (see _measure_ink_overlap).
     if matrix_usable:
-        old_binary = old_mask.astype(np.uint8) * np.uint8(255)
-        warped = cv2.warpAffine(
-            old_binary,
-            matrix[:2, :],
-            (int(new_mask.shape[1]), int(new_mask.shape[0])),
-            flags=cv2.INTER_NEAREST,
-        )
-        warped_mask = warped > 0
-        intersection = int(np.count_nonzero(warped_mask & new_mask))
-        union = int(np.count_nonzero(warped_mask | new_mask))
-        ink_overlap = intersection / union if union else 0.0
+        ink_overlap = _measure_ink_overlap(matrix, old_img, new_img, transform.model)
     else:
         ink_overlap = float("nan")
     ink_threshold = float(config.min_ink_overlap)
@@ -366,15 +506,11 @@ def assess(
     # (residual, inlier ratio, anchor count, spread, hold-out) carry no
     # evidence for them. They pass by construction and the visual ink-overlap
     # metric — the question a human would ask — carries the verdict weight.
-    corrless = (
-        count == 0
-        and transform.method
-        in {
-            AlignMethod.PHASE_CORRELATION,
-            AlignMethod.FEATURES,
-            AlignMethod.SHEET_BORDER,
-        }
-    )
+    corrless = count == 0 and transform.method in {
+        AlignMethod.PHASE_CORRELATION,
+        AlignMethod.FEATURES,
+        AlignMethod.SHEET_BORDER,
+    }
     if corrless:
         outcomes[RMS_RESIDUAL_PX] = _Outcome(
             value=rms_threshold, threshold=rms_threshold, passed=True
@@ -394,6 +530,38 @@ def assess(
         outcomes[HOLDOUT_RMS] = _Outcome(
             value=holdout_threshold, threshold=holdout_threshold, passed=True
         )
+
+    # ── Content-scale anchor-spread waiver ────────────────────────────────
+    # A similarity fit between two issues at genuinely different drawing
+    # scales (|ln scale| > 0.05) usually means the *old* drawing occupies
+    # only part of its canvas — it is the small sheet that gets enlarged.
+    # Its anchors then cannot span the whole page no matter how well they
+    # cover the content, so a spread failure is not the corner-cluster
+    # pathology metric 4 exists to catch. When every other metric — above
+    # all the scale-matched ink check over all the content that exists —
+    # passes, the spread refusal is waived and the verdict caps at good.
+    spread_waiver: str = ""
+    if (
+        not corrless
+        and count > 0
+        and not outcomes[ANCHOR_SPREAD].passed
+        and content_scale_change
+        and transform.model is TransformModel.SIMILARITY
+    ):
+        others_pass = all(
+            outcomes[name].passed for name in _METRIC_ORDER if name is not ANCHOR_SPREAD
+        )
+        if others_pass:
+            outcomes[ANCHOR_SPREAD] = _Outcome(
+                value=spread_threshold, threshold=spread_threshold, passed=True
+            )
+            spread_waiver = (
+                "The anchor-spread check is waived because the sheets genuinely "
+                f"differ in content scale (fitted scale {uniform_scale:.2f}x): the old "
+                "drawing occupies part of its canvas, so its anchors cannot span the "
+                "whole page — the ink check at the matched content scale verifies the "
+                "alignment across all the content that exists."
+            )
 
     # ── Verdict ───────────────────────────────────────────────────────────
     all_passed = all(outcome.passed for outcome in outcomes.values())
@@ -419,6 +587,9 @@ def assess(
     ):
         verdict = Verdict.EXCELLENT
     else:
+        verdict = Verdict.GOOD
+    if spread_waiver and verdict is Verdict.EXCELLENT:
+        # A waived metric cannot certify "excellent"; good is the ceiling.
         verdict = Verdict.GOOD
 
     metrics: dict[str, tuple[float, float, bool]] = {
@@ -453,6 +624,8 @@ def assess(
         rms_mm_on_site=on_site_mm,
         scale_denominator=scale_denominator,
     )
+    if spread_waiver:
+        assessment.explanation = f"{assessment.explanation} {spread_waiver}"
     if verdict in {Verdict.POOR, Verdict.FAILED}:
         assessment.suggestion = explain_failure(assessment, transform)
     return assessment
