@@ -7,7 +7,6 @@ handling, and an end-to-end naming-standard-change scenario on real PDFs.
 from __future__ import annotations
 
 from engine.core.models import SheetRecord
-from engine.naming import matcher as m
 from engine.naming.fingerprint import SheetFingerprint, build_document_fingerprints
 from engine.naming.matcher import (
     TIER_EXACT,
@@ -32,7 +31,9 @@ def sheet(
         abs_path=f"C:/issue/{filename}",
         filename=filename,
         drawing_no=drawing_no,
-        normalised_no="".join(character for character in (drawing_no or "").upper() if character.isalnum()),
+        normalised_no="".join(
+            character for character in (drawing_no or "").upper() if character.isalnum()
+        ),
         source_of_number=number_source,
         revision=revision,
         title=title,
@@ -59,6 +60,7 @@ def _fp_sim(left: SheetFingerprint, right: SheetFingerprint) -> float:
 def _fp_resolver(by_path: dict[str, SheetFingerprint]):
     def resolve(sheet: SheetRecord) -> SheetFingerprint | None:
         return by_path.get(sheet.abs_path)
+
     return resolve
 
 
@@ -150,9 +152,7 @@ def test_greedy_would_fail_and_optimal_assignment_wins():
         fingerprints[old_x.abs_path], fingerprints[new_p.abs_path]
     )
 
-    result = match_sets(
-        [old_x, old_y], [new_p, new_q], fingerprint_for=_fp_resolver(fingerprints)
-    )
+    result = match_sets([old_x, old_y], [new_p, new_q], fingerprint_for=_fp_resolver(fingerprints))
     by_old = {pair.old.filename: pair.new.filename for pair in result.pairs}
     # Greedy would give P to X (X scores .936) and leave Y with the wrong Q.
     assert by_old == {

@@ -1,0 +1,6 @@
+{
+  "id": "iso19650",
+  "label": "ISO 19650 / BS 1192",
+  "template": "{project}-{originator}-{volume}-{level}-{type}-{role}-{number}_{rev}",
+  "description": "Project - Originator - Volume - Level - Type - Role - Number, plus an optional revision. Used by international consultants in the Gulf."
+}

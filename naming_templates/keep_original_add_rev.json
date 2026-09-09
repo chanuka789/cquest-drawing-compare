@@ -1,0 +1,6 @@
+{
+  "id": "keep_original_add_rev",
+  "label": "Keep original + revision",
+  "template": "{original}_{rev}",
+  "description": "Leave the received file name alone and append the revision from the title block when there is one."
+}

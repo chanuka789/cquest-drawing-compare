@@ -7,7 +7,6 @@ the pure similarity math.
 
 from __future__ import annotations
 
-from engine.extract.text_extractor import extract_document_text
 from engine.naming import fingerprint as fp
 from engine.naming.fingerprint import (
     SheetFingerprint,
@@ -43,9 +42,7 @@ def test_same_drawing_different_naming_standard_scores_above_85(tmp_path):
             "DOOR SCHEDULE D1 D2 D3",
         ],
     )
-    old_pdf = build_pdf(
-        tmp_path / "old" / "UVU-ARC-001_RevD.pdf", [spec], offset_origin=True
-    )
+    old_pdf = build_pdf(tmp_path / "old" / "UVU-ARC-001_RevD.pdf", [spec], offset_origin=True)
     new_spec = SheetSpec(
         drawing_no="UVU-KEO-XX-03-DR-A-0001",
         title="GROUND FLOOR PLAN",

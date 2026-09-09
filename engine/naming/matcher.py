@@ -185,7 +185,9 @@ def _representatives(sheets: Sequence[SheetRecord]) -> tuple[list[SheetRecord], 
     return representatives, superseded
 
 
-def _match_by_number(old: SheetRecord, new_pool: list[SheetRecord], *, exact: bool) -> MatchPair | None:
+def _match_by_number(
+    old: SheetRecord, new_pool: list[SheetRecord], *, exact: bool
+) -> MatchPair | None:
     """Tier 1 (exact string) or tier 2 (normalised number) matching."""
     if exact:
         key = old.drawing_no or ""
@@ -194,8 +196,10 @@ def _match_by_number(old: SheetRecord, new_pool: list[SheetRecord], *, exact: bo
     else:
         key = _number_key(old)
         candidates = [sheet for sheet in new_pool if _number_key(sheet) == key]
-        confidence, tier, reason = 0.98, TIER_NORMALISED_NUMBER, (
-            "the drawing numbers match apart from formatting"
+        confidence, tier, reason = (
+            0.98,
+            TIER_NORMALISED_NUMBER,
+            ("the drawing numbers match apart from formatting"),
         )
     if not key or not candidates:
         return None
@@ -273,7 +277,13 @@ def _assign(
             continue
         pairs.append(
             _pair_with_alternatives(
-                row, col, scores, old_sheets, new_sheets, tier=tier, config=config,
+                row,
+                col,
+                scores,
+                old_sheets,
+                new_sheets,
+                tier=tier,
+                config=config,
                 reason_for=reason_for,
             )
         )
@@ -371,7 +381,7 @@ def match_sets(
         )
 
     # -- Tiers 1 and 2: the drawing number ------------------------------
-    for tier, confidence in _NUMBER_TIERS:
+    for tier, _confidence in _NUMBER_TIERS:
         exact = tier == TIER_EXACT
         remaining: list[SheetRecord] = []
         for old in old_pool:
@@ -387,7 +397,9 @@ def match_sets(
     medium_lookup: dict[str, list[SheetRecord]] = {}
     aggressive_lookup: dict[str, list[SheetRecord]] = {}
     for sheet in new_pool:
-        medium_lookup.setdefault(normalise(sheet.filename, NormLevel.MEDIUM).value, []).append(sheet)
+        medium_lookup.setdefault(normalise(sheet.filename, NormLevel.MEDIUM).value, []).append(
+            sheet
+        )
         aggressive_lookup.setdefault(
             f"a:{normalise(sheet.filename, NormLevel.AGGRESSIVE).value}", []
         ).append(sheet)

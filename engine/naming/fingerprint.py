@@ -14,7 +14,7 @@ read cheaply:
 * the number of vector paths, in a coarse bucket;
 * grid bubble labels, if any, sorted.
 
-Two versions of the same drawing typically share 85–98% of their text. Two
+Two versions of the same drawing typically share 85-98% of their text. Two
 different drawings usually share well under 40%. That gap is what makes the
 similarity score usable as the matcher's last-resort tier.
 
@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -232,9 +232,7 @@ def count_paths_on_page(page: pdfium.PdfPage) -> int:
     walked simply counts as zero paths.
     """
     try:
-        return sum(
-            1 for obj in page.get_objects() if obj.type == pdfium_raw.FPDF_PAGEOBJ_PATH
-        )
+        return sum(1 for obj in page.get_objects() if obj.type == pdfium_raw.FPDF_PAGEOBJ_PATH)
     except pdfium.PdfiumError:
         return 0
 

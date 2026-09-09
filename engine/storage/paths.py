@@ -49,10 +49,18 @@ class AppPaths:
     logs: Path
     cache: Path
     profiles: Path
+    naming_templates: Path
 
     def ensure(self) -> AppPaths:
         """Create every directory if it does not already exist."""
-        for directory in (self.root, self.db, self.logs, self.cache, self.profiles):
+        for directory in (
+            self.root,
+            self.db,
+            self.logs,
+            self.cache,
+            self.profiles,
+            self.naming_templates,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
         return self
 
@@ -68,6 +76,7 @@ class AppPaths:
             "logs": str(self.logs),
             "cache": str(self.cache),
             "profiles": str(self.profiles),
+            "naming_templates": str(self.naming_templates),
         }
 
 
@@ -80,6 +89,7 @@ def resolve_paths(root: Path | None = None) -> AppPaths:
         logs=base / "logs",
         cache=base / "cache",
         profiles=base / "profiles",
+        naming_templates=base / "naming_templates",
     )
 
 

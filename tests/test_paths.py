@@ -21,12 +21,20 @@ def test_resolve_paths_builds_the_expected_tree(tmp_path: Path):
     assert paths.logs == paths.root / "logs"
     assert paths.cache == paths.root / "cache"
     assert paths.profiles == paths.root / "profiles"
+    assert paths.naming_templates == paths.root / "naming_templates"
 
 
 def test_ensure_creates_every_directory(tmp_path: Path):
     paths = resolve_paths(tmp_path / "CQuest").ensure()
 
-    for directory in (paths.root, paths.db, paths.logs, paths.cache, paths.profiles):
+    for directory in (
+        paths.root,
+        paths.db,
+        paths.logs,
+        paths.cache,
+        paths.profiles,
+        paths.naming_templates,
+    ):
         assert directory.is_dir()
 
 
@@ -45,7 +53,7 @@ def test_project_db_names_one_file_per_project(tmp_path: Path):
 def test_as_dict_is_all_strings(tmp_path: Path):
     values = resolve_paths(tmp_path).as_dict()
 
-    assert set(values) == {"root", "db", "logs", "cache", "profiles"}
+    assert set(values) == {"root", "db", "logs", "cache", "profiles", "naming_templates"}
     assert all(isinstance(value, str) for value in values.values())
 
 
