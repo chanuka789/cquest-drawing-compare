@@ -74,29 +74,33 @@ Ruff `target-version` stays at `py313` so the code remains 3.13-compatible.
 
 ## Current phase
 
-Phase 3 — Matching and rename. Pairing drawings across issues
-(engine/naming), and safe bulk renaming to a naming standard
-(normaliser, template, planner, executor). No rendering, no image
-comparison yet.
+Phase 4 — Render and align. Rasterising sheets into tiles, computing
+the transform that maps the old sheet onto the new one, and the
+lightbox viewer. No change detection yet — that is Phase 5.
 
-Phase 2 (intake & register) is built and its rules still apply to that
-code: scan progressively, cache by (path, size, mtime), every drawing
-number records HOW it was found, a missing drawing in a partial issue
-is not a deletion, and the app never writes into the input folders.
+Phase 3 (matching & rename) is built and its rules still apply to that
+code: renames never touch the input folders and always write a full,
+verified undo log; matching is a global assignment problem; nothing
+below the confidence threshold is auto-applied. Phase 2 (intake &
+register) likewise: scan progressively, cache by (path, size, mtime),
+every drawing number records HOW it was found, a missing drawing in a
+partial issue is not a deletion, and the app never writes into the
+input folders.
 
-## Phase 3 rules
+## Phase 4 rules
 
-- NEVER modify, move, or delete a file in the user's input folders.
-  Renames write copies into the output workspace by default.
-- In-place rename requires a separate, explicit opt-in with a warning,
-  and must still write a full undo log.
-- Every rename operation is logged with old name, new name, file hash,
-  and timestamp, so it can be reversed and verified.
-- Always dry-run first. The user sees the full plan before anything
-  touches the disk.
-- Matching is a global assignment problem, not a per-file greedy search.
-- Never auto-apply a match or rename below the confidence threshold.
-  Low confidence goes to the user for a decision.
+- Refusing to align is a correct outcome. A confident wrong transform
+  is the worst possible failure. When in doubt, return `failed`.
+- Default transform model is SIMILARITY (translate, rotate, uniform
+  scale). Escalate to affine only for detected scanned sheets.
+  Never use homography unless the user explicitly enables it.
+- All tolerances and errors are expressed in millimetres on paper AND
+  in real-world millimetres at drawing scale. Never report pixels to
+  the user.
+- Render tiles losslessly. JPEG artifacts create false differences.
+- Comparison DPI default is 200. Never hard-code it.
+- Every alignment result records its method, its quality metrics, and
+  its verdict. The user must be able to see why the app trusted it.
 
 ## Known real-world facts (learned the hard way, keep in mind)
 
