@@ -27,6 +27,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from engine.api import (
     routes_ingest,
+    routes_naming,
     routes_register,
     routes_report,
     routes_system,
@@ -191,6 +192,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_ingest.router)
     app.include_router(routes_register.router)
     app.include_router(routes_report.router)
+    app.include_router(routes_naming.router)
     app.include_router(ws_progress.router)
 
     # The SPA fallback claims `/{path}`, so it must be mounted last.
