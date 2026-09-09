@@ -111,7 +111,11 @@ def _metrics_to_dict(metrics: Any) -> dict[str, dict[str, float | bool]] | None:
         return None
     output: dict[str, dict[str, float | bool]] = {}
     for name, (value, threshold, passed) in metrics.items():
-        output[str(name)] = {"value": float(value), "threshold": float(threshold), "passed": bool(passed)}
+        output[str(name)] = {
+            "value": float(value),
+            "threshold": float(threshold),
+            "passed": bool(passed),
+        }
     return output
 
 
