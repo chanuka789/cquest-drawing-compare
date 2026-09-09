@@ -344,7 +344,15 @@ def align_phase_correlation(
        corrected image converges because each residual is small.
     5. Phase-correlate the corrected old image against the new one
        (Hanning window, Gaussian pre-blur) to recover the translation.
-    6. Scale the matrix back to the full-resolution image and decompose it.
+    6. **90-degree candidate search.** Periodic content (grids, hatch) makes a
+       +/-45 deg rotation estimate ambiguous under multiples of 90 degrees.
+       The whole estimate therefore runs with the old sheet pre-rotated by
+       each of 0/90/180/270 degrees; the candidate with the strongest
+       correlation response wins and its transform is composed with the
+       pre-rotation. Without this, a 90-degree rotated drawing can be
+       'confidently' aligned the wrong way — the exact failure the quality
+       gate exists to prevent.
+    7. Scale the matrix back to the full-resolution image and decompose it.
 
     The returned matrix maps old pixels onto new pixels. ``confidence`` is
     the strongest correlation response of the three stages. On failure (size
@@ -361,68 +369,107 @@ def align_phase_correlation(
                 "phase correlation needs same-size sheets, got "
                 f"{old_gray.shape} vs {new_gray.shape}",
             )
-        full_width, full_height = old_gray.shape[1], old_gray.shape[0]
-        old_small, _ = _downsample(old_gray, coarse)
-        new_small, _ = _downsample(new_gray, coarse)
-        old_work = _rescale_to_working(old_small)
-        new_work = _rescale_to_working(new_small)
-        if old_work.shape != new_work.shape:
-            return _failed_result(
-                AlignMethod.PHASE_CORRELATION,
-                "phase correlation needs same-size sheets after rescale",
-            )
-        work_height, work_width = old_work.shape
-        lp_new, max_radius = _log_polar(_magnitude_spectrum(new_work))
-        min_scale = config.min_scale if config is not None else 0.2
-        max_scale = config.max_scale if config is not None else 5.0
 
-        matrix = np.eye(3, dtype=float)
-        responses: list[float] = []
-        converged = False
-        for _ in range(6):
+        def estimate(
+            candidate_old: np.ndarray, steps: int
+        ) -> tuple[np.ndarray, float] | None:
+            """Run the rotation/scale/translation estimate for one candidate.
+
+            Returns the full-resolution matrix mapping *candidate_old* pixels
+            onto *new* pixels, plus the correlation confidence, or None.
+            """
+            full_width, full_height = candidate_old.shape[1], candidate_old.shape[0]
+            old_small, _ = _downsample(candidate_old, coarse)
+            new_small, _ = _downsample(new_gray, coarse)
+            old_work = _rescale_to_working(old_small)
+            new_work = _rescale_to_working(new_small)
+            if old_work.shape != new_work.shape:
+                return None
+            work_height, work_width = old_work.shape
+            lp_new, max_radius = _log_polar(_magnitude_spectrum(new_work))
+            min_scale = config.min_scale if config is not None else 0.2
+            max_scale = config.max_scale if config is not None else 5.0
+
+            matrix = np.eye(3, dtype=float)
+            responses: list[float] = []
+            converged = False
+            for _ in range(6):
+                corrected = _warp_white(old_work, matrix)
+                lp_corrected, _ = _log_polar(_magnitude_spectrum(corrected))
+                rotation, rot_response = _rotation_residual(lp_corrected, lp_new)
+                responses.append(rot_response)
+                dx, scale_response = _scale_residual(lp_corrected, lp_new)
+                responses.append(scale_response)
+                if abs(rotation) < 0.02 and abs(dx) <= 0.6:
+                    converged = True
+                    break
+                scale = math.exp(dx * math.log(max_radius) / LOG_COLS_EFFECTIVE)
+                if not math.isfinite(scale) or not min_scale <= scale <= max_scale:
+                    return None
+                matrix = _similarity_about_center(
+                    work_width, work_height, rotation, scale
+                ) @ matrix
+            if not converged:
+                return None
+
             corrected = _warp_white(old_work, matrix)
-            lp_corrected, max_radius = _log_polar(_magnitude_spectrum(corrected))
-            rotation, rot_response = _rotation_residual(lp_corrected, lp_new)
-            responses.append(rot_response)
-            dx, scale_response = _scale_residual(lp_corrected, lp_new)
-            responses.append(scale_response)
-            if abs(rotation) < 0.02 and abs(dx) <= 0.6:
-                converged = True
-                break
-            scale = math.exp(dx * math.log(max_radius) / LOG_COLS_EFFECTIVE)
-            if not math.isfinite(scale) or not min_scale <= scale <= max_scale:
-                return _failed_result(
-                    AlignMethod.PHASE_CORRELATION,
-                    f"scale estimate {scale:.3f} out of the allowed range",
+            window = _hanning2d(corrected.shape)
+            smooth_old = cv2.GaussianBlur(corrected, (0, 0), SPEC_BLUR_SIGMA)
+            smooth_new = cv2.GaussianBlur(new_work, (0, 0), SPEC_BLUR_SIGMA)
+            (tx, ty), translation_response = cv2.phaseCorrelate(
+                smooth_old * window, smooth_new * window
+            )
+            responses.append(float(translation_response))
+            if not all(math.isfinite(v) for v in (tx, ty)):
+                return None
+            matrix = _similarity_about_center(0.0, 0.0, 0.0, 1.0, tx, ty) @ matrix
+            # Convert from working-canvas pixels back to the candidate's size.
+            matrix[0, 2] *= full_width / work_width
+            matrix[1, 2] *= full_height / work_height
+            if not np.all(np.isfinite(matrix)):
+                return None
+            return matrix, max(responses, default=0.0)
+
+        best_matrix: np.ndarray | None = None
+        best_confidence = 0.0
+        best_steps = 0
+        height, width = old_gray.shape
+        centre = ((width - 1) / 2.0, (height - 1) / 2.0)
+        for steps in range(4):
+            rotation2x3 = cv2.getRotationMatrix2D(centre, 90.0 * steps, 1.0)
+            pre_rotation = np.eye(3, dtype=float)
+            pre_rotation[:2, :] = rotation2x3
+            candidate_old = cv2.warpAffine(
+                old_gray,
+                rotation2x3,
+                (width, height),
+                flags=cv2.INTER_LINEAR,
+                borderValue=255,
+            )
+            estimate_matrix = estimate(candidate_old, steps)
+            if estimate_matrix is None:
+                continue
+            matrix_candidate, confidence = estimate_matrix
+            # candidate = pre_rotation . old, so old -> new is
+            # (candidate -> new) . pre_rotation.
+            full_matrix = matrix_candidate @ pre_rotation
+            if np.all(np.isfinite(full_matrix)) and confidence > best_confidence:
+                best_matrix, best_confidence, best_steps = (
+                    full_matrix,
+                    confidence,
+                    steps,
                 )
-            matrix = _similarity_about_center(work_width, work_height, rotation, scale) @ matrix
-        if not converged:
+        if best_matrix is None:
             return _failed_result(
                 AlignMethod.PHASE_CORRELATION,
-                "rotation/scale iteration did not converge",
+                "rotation/scale/translation estimation failed on all 90-degree candidates",
             )
-
-        corrected = _warp_white(old_work, matrix)
-        window = _hanning2d(corrected.shape)
-        smooth_old = cv2.GaussianBlur(corrected, (0, 0), SPEC_BLUR_SIGMA)
-        smooth_new = cv2.GaussianBlur(new_work, (0, 0), SPEC_BLUR_SIGMA)
-        (tx, ty), translation_response = cv2.phaseCorrelate(
-            smooth_old * window, smooth_new * window
+        detail = note + f"; peak response {best_confidence:.2f}"
+        if best_steps:
+            detail += f"; resolved {best_steps * 90} degree pre-rotation"
+        return _result_from_matrix(
+            best_matrix, AlignMethod.PHASE_CORRELATION, best_confidence, detail
         )
-        responses.append(float(translation_response))
-        if not all(math.isfinite(v) for v in (tx, ty)):
-            return _failed_result(
-                AlignMethod.PHASE_CORRELATION, "translation estimate is not finite"
-            )
-        matrix = _similarity_about_center(0.0, 0.0, 0.0, 1.0, tx, ty) @ matrix
-        # Convert from working-canvas pixels back to the caller's resolution.
-        matrix[0, 2] *= full_width / work_width
-        matrix[1, 2] *= full_height / work_height
-        if not np.all(np.isfinite(matrix)):
-            return _failed_result(AlignMethod.PHASE_CORRELATION, "matrix contains NaN or infinity")
-        confidence = max(responses, default=0.0)
-        detail = note + f"; peak response {confidence:.2f}"
-        return _result_from_matrix(matrix, AlignMethod.PHASE_CORRELATION, confidence, detail)
     except (cv2.error, ValueError, FloatingPointError) as exc:
         return _failed_result(AlignMethod.PHASE_CORRELATION, f"failed: {exc}")
 
