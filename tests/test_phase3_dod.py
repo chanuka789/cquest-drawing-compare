@@ -107,7 +107,6 @@ def test_collision_fixture_names_collide_under_medium(tmp_path):
 def test_copy_mode_never_touches_input_folders(tmp_path):
     """Part D: copy mode provably never writes into the input folders."""
     from engine.core.session import get_session, reset_session
-    from engine.core.workspace import create_workspace
 
     rename_planner = pytest.importorskip("engine.naming.rename_planner")
 
@@ -121,7 +120,7 @@ def test_copy_mode_never_touches_input_folders(tmp_path):
     session.old.folder = str(old_dir)
     session.new.folder = str(new_dir)
     session.new.sheets = _load_sheets(new_dir, "new")
-    workspace = create_workspace(tmp_path / "output")
+    workspace = session.set_output_folder(str(tmp_path / "output"))
 
     session.plan_renames("{original}_CLEAN", mode="copy")
     from engine.naming.rename_executor import execute_plan
