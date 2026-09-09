@@ -13,7 +13,7 @@ import type { HealthResponse } from '../api/types';
 import { isDesktop } from '../lib/native';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'ready' | 'error';
-export type ScreenName = 'setup' | 'register';
+export type ScreenName = 'setup' | 'register' | 'matching' | 'rename';
 
 interface AppState {
   status: ConnectionStatus;
@@ -26,6 +26,8 @@ interface AppState {
   connect: () => Promise<void>;
   goToRegister: () => void;
   goToSetup: () => void;
+  goToMatching: () => void;
+  goToRename: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -51,4 +53,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   goToRegister: () => set({ screen: 'register' }),
   goToSetup: () => set({ screen: 'setup' }),
+  goToMatching: () => set({ screen: 'matching' }),
+  goToRename: () => set({ screen: 'rename' }),
 }));

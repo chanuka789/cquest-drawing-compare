@@ -23,6 +23,7 @@ const ROW_HEIGHT = 40;
 export function RegisterScreen() {
   const state = useRegisterStore();
   const goToSetup = useAppStore((store) => store.goToSetup);
+  const goToMatching = useAppStore((store) => store.goToMatching);
   const rows = visibleRows(state);
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +110,19 @@ export function RegisterScreen() {
         <span className="register__count tabular micro">
           {rows.length} of {state.rows.length} shown
         </span>
+        <button
+          type="button"
+          className="register__match"
+          onClick={goToMatching}
+          disabled={state.rows.length === 0}
+          title={
+            state.rows.length === 0
+              ? 'Build the register first — there is nothing to match yet'
+              : undefined
+          }
+        >
+          Match drawings
+        </button>
         <button
           type="button"
           className="button button--primary register__export"

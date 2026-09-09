@@ -94,6 +94,28 @@
   flex: 0 0 auto;
 }
 
+/* The quiet route on to the next step: a bordered pill, not a red button. */
+.register__match {
+  flex: 0 0 auto;
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  color: var(--text-mid);
+  font-weight: var(--weight-medium);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.register__match:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.register__match:disabled {
+  opacity: 0.5;
+}
+
 .register__notice,
 .register__error {
   padding: var(--space-2) var(--space-4);

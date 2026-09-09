@@ -17,6 +17,9 @@ import type {
   IssueSide,
   IssueType,
   ListParseResult,
+  MatchDecisionsResponse,
+  MatchResult,
+  MatchStatus,
   OutputValidation,
   QuarantinedFile,
   ReconcileResult,
@@ -266,4 +269,34 @@ export function exportRegister(): Promise<{
   filename: string;
 }> {
   return post('/api/report/register');
+}
+
+// ── Matching ───────────────────────────────────────────────────────────
+
+export function getMatchStatus(): Promise<MatchStatus> {
+  return get<MatchStatus>('/api/match/status');
+}
+
+/** Start a matching run. Progress is read back from the status endpoint. */
+export function runMatch(): Promise<{ run_id: string }> {
+  return post<{ run_id: string }>('/api/match/run');
+}
+
+/** The engine answers only once its run is ready — poll status first. */
+export function fetchMatchResult(): Promise<MatchResult> {
+  return get<MatchResult>('/api/match/result');
+}
+
+/** A pair is identified by its old sheet key; manual pairs link two keys. */
+export function postMatchDecisions(decisions: {
+  accepted: string[];
+  rejected: string[];
+  manual: { old_key: string; new_key: string }[];
+}): Promise<MatchDecisionsResponse> {
+  return post<MatchDecisionsResponse>('/api/match/decisions', decisions);
+}
+
+/** Write the workspace audit JSON. 422 when no output folder is chosen. */
+export function finalizeMatch(): Promise<{ path: string | null }> {
+  return post<{ path: string | null }>('/api/match/finalize');
 }

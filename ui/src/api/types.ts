@@ -239,3 +239,81 @@ export interface ToleranceOption {
   label: string;
   millimetres: number;
 }
+
+// ── Matching ───────────────────────────────────────────────────────────
+
+export type MatchRunState = 'idle' | 'running' | 'ready' | 'failed';
+
+/** How a pair of sheets was matched, recorded so the user can judge it. */
+export type MatchTier =
+  | 'exact_number'
+  | 'normalised_number'
+  | 'normalised_name'
+  | 'fuzzy_name'
+  | 'content_fingerprint';
+
+/** Lifecycle of a matching run: idle → running → ready (or failed). */
+export interface MatchStatus {
+  state: MatchRunState;
+  run_id: string | null;
+  current: number;
+  total: number;
+  message: string | null;
+}
+
+/** One drawing sheet as the matching endpoints talk about it. */
+export interface SheetBrief {
+  abs_path: string;
+  filename: string;
+  drawing_no: string | null;
+  title: string | null;
+  revision: string | null;
+  page_index: number;
+  /** `<abs_path>#<page_index>` — how a sheet is identified in decisions. */
+  key: string;
+}
+
+/** A different sheet the matcher thought might be the right target. */
+export interface MatchAlternative {
+  sheet: SheetBrief;
+  confidence: number;
+  reason: string;
+}
+
+/** One proposed pairing of a previous-issue sheet with a current-issue sheet. */
+export interface MatchPair {
+  old: SheetBrief;
+  new: SheetBrief;
+  confidence: number;
+  tier: MatchTier;
+  reason: string;
+  ambiguous: boolean;
+  needs_review: boolean;
+  alternatives: MatchAlternative[];
+}
+
+export interface MatchSummary {
+  auto: number;
+  review: number;
+  old_unmatched: number;
+  new_unmatched: number;
+}
+
+/** Full result of a matching run. */
+export interface MatchResult {
+  pairs: MatchPair[];
+  old_unmatched: SheetBrief[];
+  new_unmatched: SheetBrief[];
+  /** Paths of older revisions ignored while matching; not shown yet. */
+  superseded: string[];
+  summary: MatchSummary;
+  notes: string[];
+}
+
+/** The engine's answer after the user's decisions are posted. */
+export interface MatchDecisionsResponse {
+  accepted: number;
+  rejected: number;
+  manual: number;
+  unresolved_review: number;
+}
