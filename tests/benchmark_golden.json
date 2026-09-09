@@ -1,0 +1,10 @@
+{
+  "cases": 4,
+  "dangerous": 0,
+  "mean_error_px": 0.5306461523005377,
+  "p95_error_px": 1.278785231972274,
+  "per_method_mean": {
+    "phase_correlation": 0.2373818094935904,
+    "features": 0.8239104951074852
+  }
+}
