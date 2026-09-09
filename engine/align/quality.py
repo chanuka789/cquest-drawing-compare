@@ -36,6 +36,7 @@ from engine.align.anchors import assess_anchor_quality
 from engine.align.transform import cross_validate, decompose, validate_transform
 from engine.align.types import (
     AlignConfig,
+    AlignMethod,
     Correspondence,
     QualityAssessment,
     TransformModel,
@@ -359,19 +360,59 @@ def assess(
         reason=holdout_reason,
     )
 
+    # ── Correspondence-free methods ───────────────────────────────────────
+    # Phase correlation, feature matching and sheet-border methods fit a
+    # transform without point correspondences, so the anchor-based metrics
+    # (residual, inlier ratio, anchor count, spread, hold-out) carry no
+    # evidence for them. They pass by construction and the visual ink-overlap
+    # metric — the question a human would ask — carries the verdict weight.
+    corrless = (
+        count == 0
+        and transform.method
+        in {
+            AlignMethod.PHASE_CORRELATION,
+            AlignMethod.FEATURES,
+            AlignMethod.SHEET_BORDER,
+        }
+    )
+    if corrless:
+        outcomes[RMS_RESIDUAL_PX] = _Outcome(
+            value=rms_threshold, threshold=rms_threshold, passed=True
+        )
+        outcomes[INLIER_RATIO] = _Outcome(
+            value=inlier_threshold, threshold=inlier_threshold, passed=True
+        )
+        # Ink overlap decides how much evidence the method really has.
+        outcomes[ANCHOR_COUNT] = _Outcome(
+            value=float(config.good_anchors if ink_passed else config.min_anchors),
+            threshold=float(config.min_anchors),
+            passed=True,
+        )
+        outcomes[ANCHOR_SPREAD] = _Outcome(
+            value=spread_threshold, threshold=spread_threshold, passed=True
+        )
+        outcomes[HOLDOUT_RMS] = _Outcome(
+            value=holdout_threshold, threshold=holdout_threshold, passed=True
+        )
+
     # ── Verdict ───────────────────────────────────────────────────────────
     all_passed = all(outcome.passed for outcome in outcomes.values())
     marginal_names = [
         name for name in _METRIC_ORDER if outcomes[name].passed and outcomes[name].marginal
     ]
-    if count == 0 or not matrix_usable or not all_passed:
+    evidence_count = (
+        count
+        if not corrless
+        else (config.good_anchors if ink_overlap >= 0.8 else config.min_anchors)
+    )
+    residual = rms_px if math.isfinite(rms_px) else (0.0 if corrless else float("inf"))
+    if (count == 0 and not corrless) or not matrix_usable or not all_passed:
         verdict = Verdict.FAILED
     elif len(marginal_names) >= 2:
         verdict = Verdict.POOR
     elif (
-        count >= config.good_anchors
-        and math.isfinite(rms_px)
-        and rms_px < 1.0
+        evidence_count >= config.good_anchors
+        and residual < 1.0
         and not marginal_names
         and outcomes[TRANSFORM_SANITY].passed
         and ink_overlap >= 0.75
@@ -405,6 +446,7 @@ def assess(
             scale_denominator=scale_denominator,
             marginal_names=marginal_names,
             failures=failures,
+            corrless=corrless,
         ),
         failures=failures,
         rms_mm_on_paper=paper_mm,
@@ -468,12 +510,16 @@ def _explanation(
     scale_denominator: int | None,
     marginal_names: list[str],
     failures: list[str],
+    *,
+    corrless: bool = False,
 ) -> str:
     """One or two plain-English sentences for every verdict."""
-    if count == 0:
+    if count == 0 and not corrless:
         context = "Could not align: no matching reference points were found."
     elif verdict is Verdict.FAILED:
-        context = f"Could not align using {method_label} ({count} reference points)."
+        context = f"Could not align using {method_label}."
+    elif corrless:
+        context = f"Aligned using {method_label}."
     else:
         context = f"Aligned using {method_label} with {count} matching reference points."
 
@@ -486,6 +532,8 @@ def _explanation(
             f"The borderline checks ({borderline}) pass within 10% of their "
             "limits, so confirm the alignment before relying on it."
         )
+    elif corrless:
+        detail = "Verified by the ink-overlap check across the whole sheet."
     else:
         detail = f"Average error {mm_report(rms_px, px_per_mm, scale_denominator)}."
     return f"{context} {detail}"
