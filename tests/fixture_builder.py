@@ -419,3 +419,208 @@ def build_revision_matrix_list(path: str | Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     book.save(target)
     return target
+
+
+# ── Phase 3 fixtures: `03_renamed`, `08_naming_mess`, `09_collision` ────
+
+
+#: The ten drawings of `03_renamed` shared by both issues, as
+#: (old number, new number, title, body lines). The body of each drawing uses
+#: words no other drawing shares, so content fingerprints of two different
+#: drawings stay well below the 0.4 line while the old and new versions of one
+#: drawing — identical body, identical title, identical sheet size — match at
+#: 1.0. The body lines read as room names and notes pinned to each sheet.
+RENAMED_SET: list[tuple[str, str, str, list[str]]] = [
+    (
+        "UVU-ARC-001",
+        "UVU-KEO-XX-03-DR-A-0001",
+        "GROUND FLOOR PLAN",
+        ["TYPICAL ROOM LAYOUT", "WALL PARTITION HEIGHT 3001"],
+    ),
+    (
+        "UVU-ARC-002",
+        "UVU-KEO-XX-03-DR-A-0002",
+        "ROOF PLAN",
+        ["ROOF SLOPE FALL OUTLET", "PARAPET GUTTER 3002"],
+    ),
+    (
+        "UVU-ARC-003",
+        "UVU-KEO-XX-03-DR-A-0003",
+        "EXTERNAL WALL SECTION",
+        ["CAVITY INSULATION CLADDING", "TIE VAPOUR BARRIER 3003"],
+    ),
+    (
+        "UVU-ARC-004",
+        "UVU-KEO-XX-03-DR-A-0004",
+        "STAIRCASE DETAILS",
+        ["STAIR FLIGHT LANDING", "HANDRAIL RISER TREAD 3004"],
+    ),
+    (
+        "UVU-ARC-005",
+        "UVU-KEO-XX-03-DR-A-0005",
+        "TOILET LAYOUT",
+        ["TOILET SHOWER COMPARTMENT", "VANITY PIPEWORK VENT 3005"],
+    ),
+    (
+        "UVU-ARC-006",
+        "UVU-KEO-XX-03-DR-A-0006",
+        "KITCHEN PLAN",
+        ["KITCHEN BENCH HOOD", "EXTRACT DUCT SERVICE 3006"],
+    ),
+    (
+        "UVU-ARC-007",
+        "UVU-KEO-XX-03-DR-A-0007",
+        "ENTRANCE LOBBY",
+        ["ENTRANCE LOBBY RECEPTION", "DESK GLAZING SCREEN 3007"],
+    ),
+    (
+        "UVU-ARC-008",
+        "UVU-KEO-XX-03-DR-A-0008",
+        "FOUNDATION PLAN",
+        ["FOUNDATION STRIP CONCRETE", "REINFORCEMENT BLINDING BEAM 3008"],
+    ),
+    (
+        "UVU-ARC-009",
+        "UVU-KEO-XX-03-DR-A-0009",
+        "FIRE ESCAPE ROUTES",
+        ["CORRIDOR FIRE ESCAPE", "ROUTE EXIT LAMP 3009"],
+    ),
+    (
+        "UVU-ARC-010",
+        "UVU-KEO-XX-03-DR-A-0010",
+        "PLANT DECK LAYOUT",
+        ["PLANT DECK UNIT", "CONDENSER LOUVRE GRILLE 3010"],
+    ),
+]
+
+#: A drawing present only in the old issue of `03_renamed`, so the matcher's
+#: old-unmatched list has something real to hold.
+RENAMED_OLD_ONLY: tuple[str, str, list[str]] = (
+    "UVU-ARC-011",
+    "OFFICE FURNITURE PLAN",
+    ["FURNITURE SCHEDULE ITEM", "FINISH ANNOTATION 3011"],
+)
+
+#: A drawing present only in the new issue of `03_renamed`, so the matcher's
+#: new-unmatched list has something real to hold.
+RENAMED_NEW_ONLY: tuple[str, str, list[str]] = (
+    "UVU-KEO-XX-03-DR-A-0011",
+    "SIGNAGE SCHEDULE",
+    ["WAYFINDING ARROW MARKING", "NOTICE ZONE 3012"],
+)
+
+
+def _renamed_old_filename(drawing_no: str, title: str) -> str:
+    """The old-standard file name: the title travels with the number."""
+    return f"{drawing_no}_{title.replace(' ', '_')}_RevC.pdf"
+
+
+def _renamed_new_filename(drawing_no: str) -> str:
+    """The new-standard file name: number only, no title."""
+    return f"{drawing_no}_RevC.pdf"
+
+
+def build_renamed_pair(root: str | Path) -> tuple[Path, Path]:
+    """`03_renamed`: the same ten drawings under a new naming standard.
+
+    The client changed the standard mid-project. Both sides carry the same ten
+    drawings with identical title, body text and sheet size; only the drawing
+    number (and so the file name) changes, `UVU-ARC-00N` on the old side and
+    `UVU-KEO-XX-03-DR-A-000N` on the new. One extra drawing exists only on the
+    old side and one only on the new side, so unmatched lists are exercised.
+    Returns the (old, new) folders.
+    """
+    root = Path(root)
+    old_dir = root / "old"
+    new_dir = root / "new"
+
+    for old_no, new_no, title, body in RENAMED_SET:
+        revision = "C"
+        build_pdf(
+            old_dir / _renamed_old_filename(old_no, title),
+            [SheetSpec(drawing_no=old_no, title=title, body=body, revision=revision)],
+        )
+        build_pdf(
+            new_dir / _renamed_new_filename(new_no),
+            [SheetSpec(drawing_no=new_no, title=title, body=body, revision=revision)],
+        )
+
+    old_no, old_title, old_body = RENAMED_OLD_ONLY
+    build_pdf(
+        old_dir / _renamed_old_filename(old_no, old_title),
+        [SheetSpec(drawing_no=old_no, title=old_title, body=old_body, revision="C")],
+    )
+
+    new_no, new_title, new_body = RENAMED_NEW_ONLY
+    build_pdf(
+        new_dir / _renamed_new_filename(new_no),
+        [SheetSpec(drawing_no=new_no, title=new_title, body=new_body, revision="C")],
+    )
+
+    return old_dir, new_dir
+
+
+def build_naming_mess(root: str | Path) -> Path:
+    """`08_naming_mess`: one folder full of naming sins on the same drawing.
+
+    Every PDF is the same drawing — drawing number UVU-ARC-001 — saved under a
+    name a real issue folder would contain: Windows copy junk, separators and
+    case, a revision and status stamp, a date, a trailing space-dot, and en
+    dashes that look exactly like hyphens. AGGRESSIVE cleaning must collapse
+    all of them to ``uvuarc001``. Returns the ``new`` folder.
+    """
+    root = Path(root)
+    new_dir = root / "new"
+    spec = SheetSpec(drawing_no="UVU-ARC-001", title="GROUND FLOOR PLAN", revision="C")
+
+    names = [
+        "Copy of UVU-ARC-001.pdf",
+        "UVU ARC 001 (1).pdf",
+        "UVU_ARC_001_RevD_FOR APPROVAL.pdf",
+        "01 - UVU-ARC-001 - 12.04.2026.pdf",
+        "uvu-arc-001 FINAL final.pdf",
+        "UVU\u2013ARC\u2013001.pdf",  # en dashes, not hyphens
+        "UVU-ARC-001 .pdf",  # trailing space-dot
+    ]
+    for name in names:
+        build_pdf(new_dir / name, [spec])
+
+    return new_dir
+
+
+def build_collision_folder(root: str | Path) -> Path:
+    """`09_collision`: two different drawings whose cleaned names collide.
+
+    Both received files read as drawing ``UVU-ARC-001`` once cleaned — the
+    sequence prefix on the first and the date stamp on the second disappear at
+    MEDIUM — so a naive rename that takes the number from the file name sends
+    both to the same target. The title blocks tell the truth: they carry
+    different drawing numbers (``UVU-ARC-001`` vs ``UVU-ARC-002``) and
+    disjoint body text, so they are clearly two different drawings. Returns
+    the ``new`` folder.
+    """
+    root = Path(root)
+    new_dir = root / "new"
+
+    build_pdf(
+        new_dir / "01 - UVU-ARC-001.pdf",
+        [
+            SheetSpec(
+                drawing_no="UVU-ARC-001",
+                title="GROUND FLOOR PLAN",
+                body=["ROOM 101 LAYOUT", "DOOR SCHEDULE D1 D2"],
+            )
+        ],
+    )
+    build_pdf(
+        new_dir / "UVU-ARC-001 - 12.04.2026.pdf",
+        [
+            SheetSpec(
+                drawing_no="UVU-ARC-002",
+                title="ROOF PLAN",
+                body=["ROOF DRAINAGE DETAIL", "FALL 1 IN 60 OUTLET"],
+            )
+        ],
+    )
+
+    return new_dir

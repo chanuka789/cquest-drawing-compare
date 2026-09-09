@@ -93,6 +93,37 @@ class ComparisonSession:
         self._cache: CacheStore | None = None
         self._cancel = CancelToken()
         self._threads: dict[str, threading.Thread] = {}
+        #: Phase 3 matching state. See :meth:`run_matching`.
+        self.matching: dict[str, object] = {
+            "state": "idle",
+            "run_id": None,
+            "current": 0,
+            "total": 0,
+            "message": None,
+            "error": None,
+        }
+        self.match_result: object | None = None
+        #: old-sheet key -> "accepted" | "rejected" (a pair is its old sheet).
+        self.match_decisions: dict[str, str] = {}
+        #: old-sheet key -> chosen new-sheet key (manual or alternative picks).
+        self.manual_pairs: dict[str, str] = {}
+        #: Phase 3 rename state. See :meth:`run_renames` / :meth:`run_undo`.
+        self.rename_run: dict[str, object] = {
+            "kind": None,
+            "state": "idle",
+            "run_id": None,
+            "current": 0,
+            "total": 0,
+            "current_item": None,
+            "completed": 0,
+            "failed": 0,
+            "message": None,
+            "error": None,
+            "failed_items": [],
+            "undo_log_path": None,
+        }
+        self.rename_plan: object | None = None
+        self._rename_cancel = CancelToken()
 
     # -- sides ---------------------------------------------------------
 
@@ -208,6 +239,337 @@ class ComparisonSession:
             issue_type=self.issue_type,
         )
         return self.register
+
+    # -- Phase 3: sheet matching ---------------------------------------
+
+    def run_matching(self) -> str:
+        """Match the two sides on a worker thread. Returns a run id."""
+        if self.matching["state"] == "running":
+            raise ValueError("A matching run is already in progress.")
+        if not self.old.sheets and not self.new.sheets:
+            raise ValueError("There are no drawings to match yet.")
+
+        run_id = f"match-{uuid.uuid4().hex[:8]}"
+        self.matching = {
+            "state": "running",
+            "run_id": run_id,
+            "current": 0,
+            "total": len(self.old.sheets) + len(self.new.sheets),
+            "message": "Starting…",
+            "error": None,
+        }
+        self.match_result = None
+        self.match_decisions = {}
+        self.manual_pairs = {}
+
+        def work() -> None:
+            from engine.core.events import RunReporter, Stage
+            from engine.naming import matcher as matcher_module
+            from engine.naming.fingerprint_cache import fingerprints_memo, resolver_from_memo
+
+            reporter = RunReporter(run_id, Stage.MATCH, total=int(self.matching["total"]))
+            try:
+                reporter.started()
+                memo = fingerprints_memo(
+                    [*self.old.sheets, *self.new.sheets], self.cache
+                )
+                result = matcher_module.match_sets(
+                    self.old.sheets,
+                    self.new.sheets,
+                    fingerprint_for=resolver_from_memo(memo),
+                )
+                self.match_result = result
+                summary = result.summary()
+                self.matching = {
+                    "state": "ready",
+                    "run_id": run_id,
+                    "current": int(self.matching["total"]),
+                    "total": int(self.matching["total"]),
+                    "message": (
+                        f"{summary['auto']} auto-matched, {summary['review']} need "
+                        f"review, {summary['old_unmatched']} unmatched."
+                    ),
+                    "error": None,
+                }
+                reporter.finished(str(self.matching["message"]))
+            except Exception as exc:
+                logger.exception("Matching failed")
+                self.matching = {
+                    "state": "failed",
+                    "run_id": run_id,
+                    "current": 0,
+                    "total": int(self.matching["total"]),
+                    "message": None,
+                    "error": "Matching could not finish. Check the log file for details.",
+                }
+                reporter.failed(str(exc))
+
+        thread = threading.Thread(target=work, name="cqdc-match", daemon=True)
+        self._threads[run_id] = thread
+        thread.start()
+        return run_id
+
+    def wait_for_matching(self, timeout: float = 300.0) -> None:
+        """Block until the matching thread finishes. Used by tests."""
+        run_id = self.matching.get("run_id")
+        thread = self._threads.get(str(run_id)) if run_id else None
+        if thread is not None:
+            thread.join(timeout=timeout)
+
+    def matching_status(self) -> dict[str, object]:
+        return dict(self.matching)
+
+    def apply_match_decisions(
+        self,
+        accepted: list[str] | None = None,
+        rejected: list[str] | None = None,
+        manual: list[dict[str, str]] | None = None,
+    ) -> dict[str, int]:
+        """Record the user's review of the match result."""
+        for key in accepted or []:
+            self.match_decisions[str(key)] = "accepted"
+            self.manual_pairs.pop(str(key), None)
+        for key in rejected or []:
+            self.match_decisions[str(key)] = "rejected"
+            self.manual_pairs.pop(str(key), None)
+        for item in manual or []:
+            old_key = str(item.get("old_key") or "")
+            new_key = str(item.get("new_key") or "")
+            if old_key and new_key:
+                self.match_decisions[old_key] = "accepted"
+                self.manual_pairs[old_key] = new_key
+
+        from engine.naming.matcher import MatchResult
+
+        result = self.match_result
+        unresolved = 0
+        if isinstance(result, MatchResult):
+            for pair in result.review_pairs:
+                key = f"{pair.old.abs_path}#{pair.old.page_index}"
+                if key not in self.match_decisions:
+                    unresolved += 1
+        return {
+            "accepted": sum(1 for value in self.match_decisions.values() if value == "accepted"),
+            "rejected": sum(1 for value in self.match_decisions.values() if value == "rejected"),
+            "manual": len(self.manual_pairs),
+            "unresolved_review": unresolved,
+        }
+
+    def finalize_matching(self) -> str | None:
+        """Snapshot the match review into the workspace audit folder."""
+        import json
+        from datetime import UTC, datetime
+
+        from engine.naming.matcher import MatchResult, result_as_dict
+
+        if self.workspace is None:
+            raise ValueError("Choose an output folder before saving the match review.")
+
+        payload: dict[str, object] = {
+            "written_at": datetime.now(UTC).isoformat(),
+            "old_folder": self.old.folder,
+            "new_folder": self.new.folder,
+            "decisions": dict(self.match_decisions),
+            "manual_pairs": dict(self.manual_pairs),
+        }
+        if isinstance(self.match_result, MatchResult):
+            payload["match"] = result_as_dict(self.match_result)
+
+        self.workspace.audit_dir.mkdir(parents=True, exist_ok=True)
+        target = self.workspace.audit_dir / "matching.json"
+        target.write_text(
+            json.dumps(payload, indent=2, default=str), encoding="utf-8"
+        )
+        return str(target)
+
+    # -- Phase 3: rename --------------------------------------------------
+
+    def rename_context(self) -> dict[str, str]:
+        """Token context from the active sheet profile (project/originator)."""
+        try:
+            from engine.titleblock.patterns import load_profile
+
+            return dict(load_profile(self.profile_id).naming)
+        except Exception:
+            return {}
+
+    def plan_renames(
+        self,
+        template: str,
+        *,
+        mode: str = "copy",
+        use_discipline_folders: bool = False,
+    ) -> object:
+        """Build the rename plan against the current (received) issue set."""
+        from engine.naming.rename_planner import build_plan
+
+        output_dir = None
+        if self.workspace is not None:
+            output_dir = (
+                self.workspace.renamed_dir
+                if mode == "copy"
+                else Path(self.new.folder or "").parent
+            )
+        plan = build_plan(
+            self.new.sheets,
+            template,
+            self.rename_context(),
+            output_dir if output_dir is not None else "",
+            mode=mode,
+            use_discipline_folders=use_discipline_folders,
+        )
+        self.rename_plan = plan
+        return plan
+
+    def run_renames(self, *, i_understand: bool = False) -> str:
+        """Apply the last rename plan on a worker thread (with progress)."""
+        if self.rename_run["state"] == "running":
+            raise ValueError("A rename or undo is already running.")
+        if self.rename_plan is None:
+            raise ValueError("Build a rename plan before applying it.")
+        if self.workspace is None:
+            raise ValueError("Choose an output folder before renaming.")
+
+        run_id = f"rename-{uuid.uuid4().hex[:8]}"
+        self._rename_cancel.reset()
+        self.rename_run = {
+            "kind": "rename",
+            "state": "running",
+            "run_id": run_id,
+            "current": 0,
+            "total": 0,
+            "current_item": None,
+            "completed": 0,
+            "failed": 0,
+            "message": None,
+            "error": None,
+            "failed_items": [],
+            "undo_log_path": None,
+        }
+        plan = self.rename_plan
+        actions = list(getattr(plan, "actions", []) or [])
+        total = len(actions)
+        self.rename_run["total"] = total
+        log_path = self.workspace.audit_dir / "rename_log.json"
+
+        def work() -> None:
+            from engine.naming.rename_executor import execute_plan
+
+            try:
+                outcome = execute_plan(
+                    plan,
+                    log_path,
+                    mode=str(self.rename_plan_mode()),
+                    i_understand=i_understand,
+                    cancel=self._rename_cancel,
+                    progress=self._rename_progress,
+                    input_folders=[
+                        folder for folder in (self.old.folder, self.new.folder) if folder
+                    ],
+                )
+                state = "cancelled" if outcome.cancelled else "done"
+                self.rename_run.update(
+                    {
+                        "state": state,
+                        "current": outcome.completed,
+                        "completed": outcome.completed,
+                        "failed": len(outcome.failed),
+                        "failed_items": outcome.failed,
+                        "undo_log_path": str(outcome.undo_log_path)
+                        if outcome.undo_log_path
+                        else None,
+                        "message": f"Renamed {outcome.completed} file(s)." if not outcome.cancelled
+                        else f"Stopped after {outcome.completed} file(s).",
+                    }
+                )
+            except Exception as exc:
+                logger.exception("Rename failed")
+                self.rename_run.update(
+                    {"state": "failed", "error": str(exc), "message": None}
+                )
+
+        thread = threading.Thread(target=work, name="cqdc-rename", daemon=True)
+        self._threads[run_id] = thread
+        thread.start()
+        return run_id
+
+    def rename_plan_mode(self) -> str:
+        """The mode the stored plan was built with ('copy' | 'in_place')."""
+        plan = self.rename_plan
+        mode = getattr(plan, "mode", None)
+        return str(mode) if mode is not None else "copy"
+
+    def _rename_progress(self, completed: int, total: int, current_item: str) -> None:
+        self.rename_run.update(
+            {
+                "current": completed,
+                "total": total,
+                "current_item": current_item,
+                "completed": completed,
+                "message": f"Renaming… {current_item}",
+            }
+        )
+
+    def cancel_rename(self) -> bool:
+        if self.rename_run["state"] == "running":
+            self._rename_cancel.cancel()
+            return True
+        return False
+
+    def run_undo(self) -> str:
+        """Reverse the last rename on a worker thread."""
+        if self.rename_run["state"] == "running":
+            raise ValueError("A rename or undo is already running.")
+        if self.workspace is None:
+            raise ValueError("No workspace for this run.")
+
+        run_id = f"undo-{uuid.uuid4().hex[:8]}"
+        self._rename_cancel.reset()
+        self.rename_run = {
+            "kind": "undo",
+            "state": "running",
+            "run_id": run_id,
+            "current": 0,
+            "total": 0,
+            "current_item": None,
+            "completed": 0,
+            "failed": 0,
+            "message": None,
+            "error": None,
+            "failed_items": [],
+            "undo_log_path": None,
+        }
+        log_path = self.workspace.audit_dir / "rename_log.json"
+
+        def work() -> None:
+            from engine.naming.undo_log import UndoLog
+
+            try:
+                undo_log = UndoLog(log_path)
+                outcome = undo_log.undo(verify=True, cancel=self._rename_cancel)
+                self.rename_run.update(
+                    {
+                        "state": "cancelled" if outcome.stopped else "done",
+                        "current": outcome.reversed,
+                        "completed": outcome.reversed,
+                        "failed": len(outcome.failed),
+                        "failed_items": outcome.failed,
+                        "undo_log_path": str(log_path),
+                        "message": outcome.reason
+                        or f"Undid {outcome.reversed} rename(s).",
+                    }
+                )
+            except Exception as exc:
+                logger.exception("Undo failed")
+                self.rename_run.update({"state": "failed", "error": str(exc)})
+
+        thread = threading.Thread(target=work, name="cqdc-undo", daemon=True)
+        self._threads[run_id] = thread
+        thread.start()
+        return run_id
+
+    def rename_status(self) -> dict[str, object]:
+        return dict(self.rename_run)
 
     def quarantine_entries(self) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []
