@@ -436,8 +436,8 @@ class ComparisonSession:
                 folder = target_folder or (str(output_dir) if output_dir is not None else "")
                 suffix = Path(getattr(action, "source_path", "")).suffix or ""
                 stem = sanitise_name(Path(chosen).stem)
-                setattr(action, "new_name", f"{stem}{suffix}")
-                setattr(action, "target_path", str(Path(folder) / f"{stem}{suffix}"))
+                action.new_name = f"{stem}{suffix}"  # type: ignore[attr-defined]
+                action.target_path = str(Path(folder) / f"{stem}{suffix}")  # type: ignore[attr-defined]
         self.rename_plan = plan
         return plan
 
