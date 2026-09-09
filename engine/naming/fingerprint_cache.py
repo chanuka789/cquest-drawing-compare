@@ -9,8 +9,7 @@ fingerprint. A matching run after the first is effectively free.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from collections.abc import Callable
 
 from loguru import logger
 
@@ -63,7 +62,9 @@ def _key_for(sheet: SheetRecord) -> CacheKey | None:
         return None
 
 
-def fingerprints_memo(sheets: list[SheetRecord], cache: CacheStore | None = None) -> dict[tuple[str, int], SheetFingerprint]:
+def fingerprints_memo(
+    sheets: list[SheetRecord], cache: CacheStore | None = None
+) -> dict[tuple[str, int], SheetFingerprint]:
     """Fingerprints for every sheet that has one, keyed by (path, page)."""
     memo: dict[tuple[str, int], SheetFingerprint] = {}
     for sheet in sheets:
@@ -77,8 +78,10 @@ def fingerprints_memo(sheets: list[SheetRecord], cache: CacheStore | None = None
 
 def resolver_from_memo(
     memo: dict[tuple[str, int], SheetFingerprint],
-):
+) -> Callable[[SheetRecord], SheetFingerprint | None]:
     """A matcher-compatible ``fingerprint_for`` callable over a memo."""
+
     def resolve(sheet: SheetRecord) -> SheetFingerprint | None:
         return memo.get((sheet.abs_path, sheet.page_index))
+
     return resolve

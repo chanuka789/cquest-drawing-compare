@@ -135,6 +135,56 @@ def _identity(sheet: SheetRecord) -> tuple[str, int]:
     return (sheet.abs_path, sheet.page_index)
 
 
+# ── Serialisation ────────────────────────────────────────────────────────
+
+
+def sheet_brief(sheet: SheetRecord) -> dict[str, object]:
+    """The small, safe view of a sheet that travels over the API."""
+    return {
+        "abs_path": sheet.abs_path,
+        "filename": sheet.filename,
+        "drawing_no": sheet.drawing_no,
+        "title": sheet.title,
+        "revision": sheet.revision,
+        "page_index": sheet.page_index,
+        "key": f"{sheet.abs_path}#{sheet.page_index}",
+    }
+
+
+def candidate_as_dict(candidate: MatchCandidate) -> dict[str, object]:
+    return {
+        "sheet": sheet_brief(candidate.sheet),
+        "confidence": candidate.confidence,
+        "tier": candidate.tier,
+        "reason": candidate.reason,
+    }
+
+
+def pair_as_dict(pair: MatchPair) -> dict[str, object]:
+    return {
+        "old": sheet_brief(pair.old),
+        "new": sheet_brief(pair.new),
+        "confidence": pair.confidence,
+        "tier": pair.tier,
+        "reason": pair.reason,
+        "ambiguous": pair.ambiguous,
+        "needs_review": pair.needs_review,
+        "alternatives": [candidate_as_dict(item) for item in pair.alternatives],
+    }
+
+
+def result_as_dict(result: MatchResult) -> dict[str, object]:
+    """JSON-safe form of a match result, for the API and the audit log."""
+    return {
+        "pairs": [pair_as_dict(pair) for pair in result.pairs],
+        "old_unmatched": [sheet_brief(sheet) for sheet in result.old_unmatched],
+        "new_unmatched": [sheet_brief(sheet) for sheet in result.new_unmatched],
+        "superseded": [sheet_brief(sheet) for sheet in result.superseded],
+        "summary": result.summary(),
+        "notes": list(result.notes),
+    }
+
+
 def _number_key(sheet: SheetRecord) -> str:
     return sheet.normalised_no or normalise(sheet.drawing_no or "", NormLevel.MEDIUM).value
 

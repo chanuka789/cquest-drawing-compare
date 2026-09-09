@@ -116,6 +116,9 @@ class SheetProfile:
     revision_scheme: str = "unknown"
     #: Remembered column mapping for this client's drawing list.
     list_column_mapping: dict[str, str] = field(default_factory=dict)
+    #: Fixed values for rename templates: project, originator, and a default
+    #: status, resolved as `{project}`, `{originator}` and `{status}` tokens.
+    naming: dict[str, str] = field(default_factory=dict)
 
     def compiled_number_patterns(self) -> list[re.Pattern[str]]:
         return _compile_all(tuple(self.number_patterns))
@@ -135,6 +138,7 @@ class SheetProfile:
             "scale_labels": self.scale_labels,
             "revision_scheme": self.revision_scheme,
             "list_column_mapping": self.list_column_mapping,
+            "naming": self.naming,
         }
 
     @classmethod
@@ -151,6 +155,7 @@ class SheetProfile:
             scale_labels=list(data.get("scale_labels", base.scale_labels)),  # type: ignore[arg-type]
             revision_scheme=str(data.get("revision_scheme", base.revision_scheme)),
             list_column_mapping=dict(data.get("list_column_mapping", {})),  # type: ignore[arg-type]
+            naming=dict(data.get("naming", {})),  # type: ignore[arg-type]
         )
 
 
