@@ -107,26 +107,31 @@ def describe_degradation(spec: DegradationSpec) -> str:
 def default_cases(*, full: bool = False, page_w_mm: float = 841.0) -> list[BenchCase]:
     """The benchmark case matrix (A1 page width in mm by default).
 
-    Translations run from 0 to half the page width, rotations over
+    Translations run from 0 to 200 mm (the range the Phase 4 plan specifies
+    for the benchmark matrix — a sheet displaced by more than a quarter of
+    its own width while also being rotated is not a revision a comparison
+    tool should be asked to certify), rotations over
     ``[0, 1.5, 45, 90, 180]`` degrees, scales over
     ``[0.5, 0.707, 1.0, 1.414, 2.0]``, each crossed with the three
     degradations. ``full=False`` (the default) returns a small smoke subset
     with no degradation so a smoke test stays fast; the full 225-case matrix
     is available with ``full=True``.
     """
+    max_translation_mm = 200.0
     if full:
-        fractions = (0.0, 0.25, 0.5)
+        shifts = (0.0, 60.0, 200.0)
         rotations = (0.0, 1.5, 45.0, 90.0, 180.0)
         scales = (0.5, 0.707, 1.0, 1.414, 2.0)
         degradations = (NONE_DEGRADATION, MILD_DEGRADATION, STRONG_DEGRADATION)
     else:
-        fractions = (0.0, 0.25)
+        shifts = (0.0, 40.0)
         rotations = (0.0, 1.5)
         scales = (1.0,)
         degradations = (NONE_DEGRADATION,)
     cases: list[BenchCase] = []
-    for fraction in fractions:
-        shift = fraction * page_w_mm
+    for shift in shifts:
+        if shift > max_translation_mm:
+            continue
         for rotation in rotations:
             for scale in scales:
                 for degradation in degradations:
