@@ -399,9 +399,17 @@ class ComparisonSession:
         *,
         mode: str = "copy",
         use_discipline_folders: bool = False,
+        overrides: dict[str, str] | None = None,
     ) -> object:
-        """Build the rename plan against the current (received) issue set."""
+        """Build the rename plan against the current (received) issue set.
+
+        `overrides` maps a source path to a replacement file name chosen by
+        the user in the review table; it is sanitised and applied after the
+        normal template render so one-off corrections never fight the bulk
+        rule.
+        """
         from engine.naming.rename_planner import build_plan
+        from engine.naming.template import sanitise_name
 
         output_dir = None
         if self.workspace is not None:
@@ -418,6 +426,18 @@ class ComparisonSession:
             mode=mode,
             use_discipline_folders=use_discipline_folders,
         )
+        if overrides:
+            for action in getattr(plan, "actions", []):
+                source = getattr(action, "source_path", "")
+                chosen = overrides.get(source)
+                if not chosen:
+                    continue
+                target_folder = getattr(action, "target_folder", "")
+                folder = target_folder or (str(output_dir) if output_dir is not None else "")
+                suffix = Path(getattr(action, "source_path", "")).suffix or ""
+                stem = sanitise_name(Path(chosen).stem)
+                setattr(action, "new_name", f"{stem}{suffix}")
+                setattr(action, "target_path", str(Path(folder) / f"{stem}{suffix}"))
         self.rename_plan = plan
         return plan
 
@@ -482,6 +502,7 @@ class ComparisonSession:
                         else f"Stopped after {outcome.completed} file(s).",
                     }
                 )
+                self._mirror_rename_log(log_path)
             except Exception as exc:
                 logger.exception("Rename failed")
                 self.rename_run.update(
@@ -559,6 +580,7 @@ class ComparisonSession:
                         or f"Undid {outcome.reversed} rename(s).",
                     }
                 )
+                self._mirror_rename_log(log_path)
             except Exception as exc:
                 logger.exception("Undo failed")
                 self.rename_run.update({"state": "failed", "error": str(exc)})
@@ -570,6 +592,30 @@ class ComparisonSession:
 
     def rename_status(self) -> dict[str, object]:
         return dict(self.rename_run)
+
+    def _mirror_rename_log(self, log_path: Path) -> None:
+        """Copy settled rename-log entries into the workspace SQLite mirror."""
+        from engine.naming.undo_log import UndoLog
+        from engine.storage.rename_mirror import make_rename_log_mirror
+
+        mirror = make_rename_log_mirror(self.workspace)
+        if mirror is None or self.workspace is None:
+            return
+        try:
+            log = UndoLog(log_path)
+        except OSError:
+            return
+        for entry in log.entries():
+            data: dict[str, object] = {
+                "seq": entry.seq,
+                "operation": entry.operation,
+                "source_path": entry.source_path,
+                "target_path": entry.target_path,
+                "source_hash": entry.source_hash,
+                "success": entry.success,
+                "timestamp": entry.timestamp,
+            }
+            mirror(data)
 
     def quarantine_entries(self) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []

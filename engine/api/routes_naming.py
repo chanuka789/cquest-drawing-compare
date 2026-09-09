@@ -40,6 +40,8 @@ class RenamePlanRequest(BaseModel):
     template: str = Field(min_length=1)
     mode: str = "copy"
     use_discipline_folders: bool = False
+    #: source path -> replacement file name, chosen row by row in the UI.
+    overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class RenameApplyRequest(BaseModel):
@@ -157,6 +159,7 @@ def build_rename_plan(body: RenamePlanRequest) -> dict[str, Any]:
             body.template,
             mode=body.mode,
             use_discipline_folders=body.use_discipline_folders,
+            overrides=body.overrides,
         )
     except (ValueError, OSError) as exc:
         raise ValidationError(str(exc)) from exc
