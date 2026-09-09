@@ -23,6 +23,11 @@ import type {
   OutputValidation,
   QuarantinedFile,
   ReconcileResult,
+  RenameContext,
+  RenameMode,
+  RenamePlan,
+  RenameStatus,
+  RenameTemplate,
   SheetProfileOption,
   SheetRow,
   SideState,
@@ -299,4 +304,46 @@ export function postMatchDecisions(decisions: {
 /** Write the workspace audit JSON. 422 when no output folder is chosen. */
 export function finalizeMatch(): Promise<{ path: string | null }> {
   return post<{ path: string | null }>('/api/match/finalize');
+}
+
+// ── Rename ─────────────────────────────────────────────────────────────
+
+export function fetchRenameTemplates(): Promise<RenameTemplate[]> {
+  return get<RenameTemplate[]>('/api/rename/templates');
+}
+
+/** Fixed template tokens (project, originator) from the sheet profile. */
+export function fetchRenameContext(): Promise<RenameContext> {
+  return get<RenameContext>('/api/rename/profile-context');
+}
+
+/** Dry-run the template and return the full plan. 422 when nothing to rename. */
+export function postRenamePlan(body: {
+  template: string;
+  mode: RenameMode;
+  use_discipline_folders: boolean;
+  overrides: Record<string, string>;
+}): Promise<RenamePlan> {
+  return post<RenamePlan>('/api/rename/plan', body);
+}
+
+/** Apply the plan the session holds. The UI re-posts the plan first. */
+export function applyRename(iUnderstand: boolean): Promise<{ run_id: string }> {
+  return post<{ run_id: string }>('/api/rename/apply', {
+    i_understand: iUnderstand,
+  });
+}
+
+/** Where the rename or undo run has got to — polled, not a socket. */
+export function fetchRenameStatus(): Promise<RenameStatus> {
+  return get<RenameStatus>('/api/rename/status');
+}
+
+export function cancelRename(): Promise<{ cancelled: boolean }> {
+  return post<{ cancelled: boolean }>('/api/rename/cancel');
+}
+
+/** Reverse the last apply run, verifying each file's hash first. */
+export function undoRename(): Promise<{ run_id: string }> {
+  return post<{ run_id: string }>('/api/rename/undo');
 }

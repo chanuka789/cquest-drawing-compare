@@ -6,29 +6,3 @@
   height: 100%;
   background: var(--room-900);
 }
-
-/* The rename placeholder until its screen is built. */
-.rename {
-  flex: 1 1 auto;
-  display: grid;
-  place-items: center;
-  padding: var(--space-6);
-}
-
-.rename__card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-5);
-  max-width: 520px;
-  padding: var(--space-7);
-  border: 1px solid var(--room-300);
-  border-radius: var(--radius-lg);
-  background: var(--room-700);
-  box-shadow: var(--shadow-overlay);
-  text-align: center;
-}
-
-.rename__title {
-  font-size: var(--text-screen-title);
-}

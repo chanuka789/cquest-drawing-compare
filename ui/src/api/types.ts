@@ -317,3 +317,107 @@ export interface MatchDecisionsResponse {
   manual: number;
   unresolved_review: number;
 }
+
+// ── Rename ─────────────────────────────────────────────────────────────
+
+/** Where a rename writes its result: a copy or the file itself. */
+export type RenameMode = 'copy' | 'in_place';
+
+/** Every verdict the planner can give one planned rename. */
+export type RenameActionStatus =
+  | 'ok'
+  | 'unchanged'
+  | 'collision'
+  | 'invalid_name'
+  | 'path_too_long'
+  | 'missing_tokens'
+  | 'locked'
+  | 'reserved_name'
+  | 'source_missing';
+
+/** One naming template preset, from GET /api/rename/templates. */
+export interface RenameTemplate {
+  id: string;
+  label: string;
+  template: string;
+  description: string;
+}
+
+/** Fixed profile values the fixed template tokens resolve against. */
+export interface RenameContext {
+  project?: string | null;
+  originator?: string | null;
+  status?: string | null;
+}
+
+/** One planned rename: what is copied or moved, and to where. */
+export interface RenameAction {
+  source_path: string;
+  target_path: string;
+  target_folder: string;
+  status: RenameActionStatus;
+  old_name: string;
+  new_name: string;
+  warnings: string[];
+}
+
+/** Per-status counts plus the grouped numbers the summary bar needs. */
+export interface RenameSummary {
+  ok: number;
+  unchanged: number;
+  collision: number;
+  invalid_name: number;
+  path_too_long: number;
+  missing_tokens: number;
+  locked: number;
+  reserved_name: number;
+  source_missing: number;
+  /** Same number as `ok`; how many files would actually move or copy. */
+  to_change: number;
+  /** Anything that is not ok or unchanged — needs a human decision. */
+  problems: number;
+}
+
+/** The full dry run: every action, the counts, and whether it may apply. */
+export interface RenamePlan {
+  actions: RenameAction[];
+  summary: RenameSummary;
+  can_apply: boolean;
+  /** Plan-level errors, shown verbatim; they block applying. */
+  errors: string[];
+  mode: RenameMode;
+  /** Where copies land in copy mode; carried as metadata in in-place mode. */
+  output_dir: string;
+  /** Up to three real rendered file names for the live template preview. */
+  preview: string[];
+}
+
+/** What a rename or undo run is doing. */
+export type RenameRunKind = 'rename' | 'undo';
+
+/** Lifecycle of a rename or undo run on the engine. */
+export type RenameRunState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** One file an apply or undo run could not handle. */
+export interface RenameFailedItem {
+  path: string;
+  error?: string;
+  reason?: string;
+  note?: string;
+}
+
+/** Response of GET /api/rename/status. */
+export interface RenameStatus {
+  kind: RenameRunKind | null;
+  state: RenameRunState;
+  run_id: string | null;
+  current: number;
+  total: number;
+  current_item: string | null;
+  completed: number;
+  failed: number;
+  message: string | null;
+  error: string | null;
+  failed_items: RenameFailedItem[];
+  undo_log_path: string | null;
+}

@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { TopBar } from './components/TopBar';
 import { MatchingScreen } from './screens/Matching';
 import { RegisterScreen } from './screens/Register';
+import { RenameScreen } from './screens/Rename';
 import { SetupScreen } from './screens/Setup';
 import { useAppStore } from './store/appStore';
 
@@ -22,22 +23,7 @@ export default function App() {
       {screen === 'setup' && <SetupScreen />}
       {screen === 'register' && <RegisterScreen />}
       {screen === 'matching' && <MatchingScreen />}
-      {screen === 'rename' && <RenamePlaceholder />}
-    </div>
-  );
-}
-
-/** The rename step lands here until its own screen is built. */
-function RenamePlaceholder() {
-  const goToMatching = useAppStore((state) => state.goToMatching);
-  return (
-    <div className="rename">
-      <div className="rename__card">
-        <h1 className="rename__title">Rename review screen comes next</h1>
-        <button type="button" className="button button--primary" onClick={goToMatching}>
-          ← Back to matching
-        </button>
-      </div>
+      {screen === 'rename' && <RenameScreen />}
     </div>
   );
 }
