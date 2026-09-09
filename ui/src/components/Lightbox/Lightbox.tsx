@@ -1,5 +1,5 @@
 /**
- * Lightbox — the tiled drawing viewer core (Phase 4, Task 4.11).
+ * Lightbox — the tiled drawing viewer core (Phase 4, Tasks 4.11 + 4.12).
  *
  * Two rendered sheets (old and new) are drawn from PNG tiles served by the
  * engine at `{base}/api/tiles/{sheet_id}/...`. Only the tiles visible in the
@@ -15,63 +15,108 @@
  *    It draws the same visible tiles into a 2D context with the same
  *    interactions, and a non-blocking `role="status"` note says so.
  *
+ * View modes (Task 4.12), driven by the `mode` prop and the control bar:
+ *  - overlay (default): both sheets recoloured — old-only ink blue
+ *    `#0E63C4`, new-only ink red `#E8442A`, coinciding ink 55 % grey — via
+ *    a custom fragment shader compositing two off-screen bakes
+ *    (see filters.ts for the exact model and its documented
+ *    approximations). The Canvas 2D fallback mirrors the same per-pixel
+ *    math on a low-resolution blend canvas.
+ *  - swipe: a draggable divider; the old sheet left of the seam, the new
+ *    sheet right of it. The divider is a brand-red chrome line (the seam).
+ *  - blink: alternates old/new at an adjustable interval (default 600 ms);
+ *    Space toggles playback.
+ *  - single: one sheet at a time; O/N switch between old and new.
+ * The user's last mode is remembered in localStorage under
+ * `cqdc.lightbox.mode` (see prefs.ts).
+ *
  * Interaction (all of it moves the container transform only — textures are
  * never re-created while panning):
  *  - drag to pan, wheel zooms around the pointer, pinch on touch
- *  - keyboard: arrows pan, +/− zoom, 0 fits, 1 = 100 %
+ *  - keyboard: arrows pan (nudge the divider in swipe), +/− zoom, 0 fits,
+ *    Ctrl+1 = 100 %, 1–4 choose the mode, Space plays/pauses blink,
+ *    [ and ] fade the old layer, O/N switch the single sheet.
  *
  * Chrome drawn over the room background, never over the drawing:
  *  - a minimap (plain 2D canvas in the corner) redrawn at ~15 fps
  *  - a scale readout: zoom percent, and — from `pxPerMm` (falling back to
  *    `dpi / 25.4`) — what 100 mm on paper measures at the current zoom.
- *
- * Props are kept deliberately minimal: view modes (single sheet, swipe,
- * blink, overlay opacity) are Task 4.12 and will add their own controls.
- * `initialMode` is accepted now only so the prop surface stays stable; this
- * core always stacks both layers, old beneath new.
+ *  - an optional control bar with the mode switches, the overlay opacity
+ *    slider, the blink speed and playback controls and a reset-view
+ *    button. The "show annotations layer" toggle of the plan is omitted
+ *    on purpose: the engine does not serve an annotations layer yet.
  *
  * Lifecycle is one effect: it creates everything and tears everything down
  * (Pixi app, textures, observers, listeners). Cleanup is idempotent, which
  * makes React 19 StrictMode's double-mount safe.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Application,
   Container,
   Graphics,
   ImageSource,
   Matrix,
+  RenderTexture,
   Sprite,
   Texture,
   isWebGLSupported,
 } from 'pixi.js';
 import type { TileManifest } from '../../api/types';
+import {
+  COLOUR_BLIND_DIFF_PALETTE,
+  DEFAULT_DIFF_PALETTE,
+  LayerCompareFilter,
+  compositeOverlayPixel,
+  hexToRgb01,
+} from './filters';
+import type { DiffPalette, LayerCompareSettings, Rgb01 } from './filters';
 import { pixiMatrixFromAlignment } from './pixiMatrix';
+import { readStoredLightboxMode, writeStoredLightboxMode } from './prefs';
 import { tileSpans, useTileLoader, visibleTiles } from './useTileLoader';
 import type { TileLoader, TileViewport, VisibleTile } from './useTileLoader';
 
 import './Lightbox.css';
 
-/** GPU texture budget, matching the loader's decoded-tile budget. */
-const TILE_TEXTURE_BUDGET = 300;
-/** One tile of margin prefetched around the visible edge. */
-const PREFETCH_RING = 1;
-/** Zoom range, in screen pixels per sheet pixel. */
-const MIN_SCALE = 0.005;
-const MAX_SCALE = 64;
-/** Wheel zoom rate: one click (deltaY ≈ ±100) zooms about 15 %. */
-const WHEEL_ZOOM_RATE = 0.0016;
-/** One arrow-key press pans this many screen pixels. */
-const KEY_PAN_PX = 48;
-/** Keyboard zoom factor per press. */
-const KEY_ZOOM_FACTOR = 1.25;
-/** Minimap redraw throttle in frames (60 fps → ~15 fps). */
-const MINIMAP_EVERY_FRAMES = 4;
-/** Placeholder (tile still loading) alpha over the sheet. */
-const PLACEHOLDER_ALPHA = 0.55;
-
 export type LightboxRendererMode = 'webgl' | 'canvas2d';
+
+/** The four view modes of Task 4.12. */
+export type LightboxMode = 'overlay' | 'swipe' | 'blink' | 'single';
+
+/** Which single sheet the single mode shows. */
+export type LightboxSingleSide = 'old' | 'new';
+
+/**
+ * Initial values for the view-mode controls. Applied once, on mount (like
+ * `initialMode`), and only when the matching prop is undefined — the
+ * sliders and toggles are otherwise owned by the component itself.
+ */
+export interface LightboxModeOptions {
+  /** Blink half-cycle interval in milliseconds (clamped 200–2000). */
+  blinkMs?: number;
+  /** Old-layer opacity for overlay (0..1). */
+  oldOpacity?: number;
+  /** Start with the colour-blind-safe (blue/orange) overlay palette. */
+  colourBlindSafe?: boolean;
+  /** Which sheet the single mode starts on. */
+  singleSide?: LightboxSingleSide;
+}
+
+/** Everything the backends need to know to draw one frame's mode. */
+export interface LightboxDrawEffects {
+  mode: LightboxMode;
+  /** 0..1 strength of the old-only ink in overlay. */
+  oldOpacity: number;
+  /** Which layer blink currently shows. */
+  blinkShowOld: boolean;
+  /** Which layer the single mode shows. */
+  singleSide: LightboxSingleSide;
+  /** 0..1 across the canvas: the swipe divider's position. */
+  dividerFrac: number;
+  /** Ink colours the overlay classification recolours with. */
+  palette: DiffPalette;
+}
 
 export interface LightboxProps {
   /** Engine sheet id for the previous issue; null hides that layer. */
@@ -88,13 +133,77 @@ export interface LightboxProps {
   /** Pixels per millimetre of the rendered sheet; defaults to dpi / 25.4. */
   pxPerMm?: number;
   /**
-   * Accepted for forward compatibility with the Task 4.12 view modes.
-   * This core ignores it: both layers are always stacked (old below new).
+   * Legacy Task 4.11 mode placeholder: `overlay` (the default), or a
+   * single sheet shown raw. Kept for backward compatibility; prefer
+   * `mode` + `modeOptions.singleSide`. `initialMode` only sets the initial
+   * state and loses to a stored preference.
    */
   initialMode?: 'overlay' | 'single-old' | 'single-new';
   /** Extra class for the root element, e.g. a screen's layout class. */
   className?: string;
+  /**
+   * Controlled view mode. When provided, the component renders this mode
+   * and reports user changes through `onModeChange` instead of changing
+   * it internally. When absent the component owns the mode and remembers
+   * it in localStorage (`cqdc.lightbox.mode`).
+   */
+  mode?: LightboxMode;
+  /** Fired when the user picks a mode from the bar or the keyboard. */
+  onModeChange?: (mode: LightboxMode) => void;
+  /** Initial control values; see {@link LightboxModeOptions}. */
+  modeOptions?: LightboxModeOptions;
+  /**
+   * Show the control bar (mode switches, sliders, reset view). Screens
+   * that embed the lightbox with their own chrome pass `false`.
+   * Defaults to true. Keyboard access works either way.
+   */
+  controls?: boolean;
 }
+
+/** Order matches the digit keys 1–4. */
+const MODE_ORDER: ReadonlyArray<LightboxMode> = ['overlay', 'swipe', 'blink', 'single'];
+
+/** GPU texture budget, matching the loader's decoded-tile budget. */
+const TILE_TEXTURE_BUDGET = 300;
+/** One tile of margin prefetched around the visible edge. */
+const PREFETCH_RING = 1;
+/** Zoom range, in screen pixels per sheet pixel. */
+const MIN_SCALE = 0.005;
+const MAX_SCALE = 64;
+/** Wheel zoom rate: one click (deltaY ≈ ±100) zooms about 15 %. */
+const WHEEL_ZOOM_RATE = 0.0016;
+/** One arrow-key press pans this many screen pixels. */
+const KEY_PAN_PX = 48;
+/** One arrow-key press moves the swipe divider this many pixels. */
+const KEY_DIVIDER_NUDGE_PX = 24;
+/** Keyboard zoom factor per press. */
+const KEY_ZOOM_FACTOR = 1.25;
+/** Minimap redraw throttle in frames (60 fps → ~15 fps). */
+const MINIMAP_EVERY_FRAMES = 4;
+/** Placeholder (tile still loading) alpha over the sheet. */
+const PLACEHOLDER_ALPHA = 0.55;
+
+/** Blink interval range and default, in milliseconds. */
+const BLINK_MIN_MS = 200;
+const BLINK_MAX_MS = 2000;
+const BLINK_DEFAULT_MS = 600;
+/** Keyboard step for the old-layer opacity and its range. */
+const OPACITY_KEY_STEP = 0.1;
+
+/** Composite bakes are capped at 1.5× device pixels to bound GPU memory. */
+const COMPOSITE_MAX_RESOLUTION = 1.5;
+/** Canvas 2D overlay classifies at ≤ half resolution (see drawOverlay). */
+const CANVAS_OVERLAY_MAX_SCALE = 0.5;
+
+/** Initial effects until React pushes the first real ones. */
+const DEFAULT_DRAW_EFFECTS: LightboxDrawEffects = {
+  mode: 'overlay',
+  oldOpacity: 1,
+  blinkShowOld: true,
+  singleSide: 'old',
+  dividerFrac: 0.5,
+  palette: DEFAULT_DIFF_PALETTE,
+};
 
 interface ViewState {
   /** World-pixel x at the left edge of the viewport. */
@@ -153,6 +262,8 @@ interface Backend {
   applyView(view: ViewState): void;
   /** The visible tile set changed (pan crossed a tile, a tile arrived…). */
   setScene(scene: Scene): void;
+  /** Mode controls changed (mode, opacity, blink side, divider, palette). */
+  setEffects(effects: LightboxDrawEffects): void;
 }
 
 const DEFAULT_COLORS: TokenColors = {
@@ -162,6 +273,18 @@ const DEFAULT_COLORS: TokenColors = {
   textMid: '#9da9b5',
   textHi: '#edf1f5',
 };
+
+/** The sheet token as 0..1 components; mirrors `--sheet` when unreadable. */
+const FALLBACK_PAGE_COLOUR: Rgb01 = { r: 0xf7 / 255, g: 0xf6 / 255, b: 0xf3 / 255 };
+
+/** Parse a token's hex string; a malformed token falls back to `--sheet`. */
+function pageColourFromToken(tokenValue: string): Rgb01 {
+  try {
+    return hexToRgb01(tokenValue);
+  } catch {
+    return FALLBACK_PAGE_COLOUR;
+  }
+}
 
 /** Tokens are the single source of truth; these fallbacks mirror them. */
 function readTokenColors(): TokenColors {
@@ -198,6 +321,8 @@ interface PixiLayerObjects {
   placeholders: Graphics;
   tiles: Container;
   sprites: Map<string, Sprite>;
+  /** The alignment matrix applied to this container (null = identity). */
+  matrix: Matrix | null;
   matrixKey: string;
   backdropKey: string;
   placeholderKey: string;
@@ -216,10 +341,16 @@ function newPixiLayer(): PixiLayerObjects {
     placeholders,
     tiles,
     sprites: new Map(),
+    matrix: null,
     matrixKey: '',
     backdropKey: '',
     placeholderKey: '',
   };
+}
+
+/** The world-space matrix of a view, matching the world container. */
+function viewMatrixFor(view: ViewState): Matrix {
+  return new Matrix(view.scale, 0, 0, view.scale, -view.x * view.scale, -view.y * view.scale);
 }
 
 class PixiBackend implements Backend {
@@ -235,8 +366,32 @@ class PixiBackend implements Backend {
   private textures = new Map<string, Texture>();
   private destroyed = false;
 
+  /** The mode effects; DEFAULT_DRAW_EFFECTS until React pushes the first. */
+  private effects: LightboxDrawEffects = DEFAULT_DRAW_EFFECTS;
+  /** The sheet token colour the overlay classification paints with. */
+  private readonly pageColour: Rgb01;
+  /** Which layers have sheet content right now (drives visibility/bakes). */
+  private hasLayer: Record<'old' | 'new', boolean> = { old: false, new: false };
+  private view: ViewState = { x: 0, y: 0, scale: 1 };
+  private cssWidth = 0;
+  private cssHeight = 0;
+  /** Bake resolution in physical pixels per CSS pixel (capped). */
+  private compositeResolution = 1;
+
+  /** Overlay/swipe composite: bake targets + full-canvas filtered sprite. */
+  private rtOld: RenderTexture | null = null;
+  private rtNew: RenderTexture | null = null;
+  private compositeSprite: Sprite | null = null;
+  private compositeFilter: LayerCompareFilter | null = null;
+  private transparentTexture: Texture | null = null;
+  /** Size key the current bake targets were created at. */
+  private compositeTargetKey = '';
+  /** Rendered into a bake target when a layer has no sheet (clears it). */
+  private readonly emptyBake = new Container();
+
   constructor(host: FrameHost) {
     this.host = host;
+    this.pageColour = pageColourFromToken(host.colors.sheet);
   }
 
   async init(stage: HTMLDivElement): Promise<void> {
@@ -272,14 +427,40 @@ class PixiBackend implements Backend {
       this.layerObjects.set(id, layer);
       this.world.addChild(layer.container);
     }
+    // The composite sprite sits above the world. It is transparent and
+    // normally invisible; in overlay/swipe modes the world is hidden and
+    // this sprite carries the LayerCompareFilter output instead.
+    this.transparentTexture = this.createTransparentTexture();
+    const composite = new Sprite(this.transparentTexture);
+    composite.visible = false;
+    this.compositeSprite = composite;
+    app.stage.addChild(composite);
     app.canvas.className = 'lightbox__pixi-canvas';
     stage.appendChild(app.canvas);
     app.ticker.add(() => this.host.onFrame());
   }
 
+  private createTransparentTexture(): Texture {
+    const blank = document.createElement('canvas');
+    blank.width = 1;
+    blank.height = 1;
+    const source = new ImageSource({
+      resource: blank,
+      label: 'lightbox-composite-blank',
+      autoGarbageCollect: false,
+    });
+    return new Texture({ source });
+  }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.releaseCompositeTargets();
+    if (this.transparentTexture) {
+      this.transparentTexture.destroy(true);
+      this.transparentTexture = null;
+    }
+    this.compositeSprite = null;
     for (const texture of this.textures.values()) texture.destroy(true);
     this.textures.clear();
     for (const layer of this.layerObjects.values()) {
@@ -298,13 +479,31 @@ class PixiBackend implements Backend {
     app.renderer.resize(width, height, devicePixelRatio);
     app.canvas.style.width = `${width}px`;
     app.canvas.style.height = `${height}px`;
+    this.cssWidth = width;
+    this.cssHeight = height;
+    this.compositeResolution = Math.max(
+      1,
+      Math.min(devicePixelRatio || 1, COMPOSITE_MAX_RESOLUTION),
+    );
+    if (this.isComposite()) {
+      const targetKey = `${width}x${height}@${this.compositeResolution}`;
+      if (targetKey !== this.compositeTargetKey) {
+        this.releaseCompositeTargets();
+        this.ensureCompositeTargets();
+      }
+      // The following reconcile (setScene) re-bakes the new targets.
+    }
   }
 
   applyView(view: ViewState): void {
     const world = this.world;
     if (!world || !(view.scale > 0)) return;
+    this.view = { ...view };
     world.position.set(-view.x * view.scale, -view.y * view.scale);
     world.scale.set(view.scale, view.scale);
+    // Bakes happen in setScene (the core reconciles after every view
+    // change), so a composite frame is always freshly baked — no extra
+    // render work here.
   }
 
   setScene(scene: Scene): void {
@@ -325,11 +524,32 @@ class PixiBackend implements Backend {
       if (!objects) continue;
       if (layer === null) {
         objects.container.visible = false;
+        this.hasLayer[id] = false;
         continue;
       }
+      this.hasLayer[id] = true;
       this.syncLayer(layer, objects);
     }
+    this.refreshVis();
+    if (this.isComposite()) this.bakeComposite();
     this.evictTextures(wanted);
+  }
+
+  setEffects(effects: LightboxDrawEffects): void {
+    const wasComposite = this.isComposite();
+    this.effects = effects;
+    const isComposite = this.isComposite();
+    if (isComposite) {
+      this.ensureCompositeTargets();
+      const filter = this.compositeFilter;
+      if (filter) filter.setSettings(this.compositeSettings());
+      // Content baked while the previous mode drew directly may be stale:
+      // re-bake whenever the composite pass (re)appears.
+      if (!wasComposite) this.bakeComposite();
+    } else {
+      this.releaseCompositeTargets();
+    }
+    this.refreshVis();
   }
 
   private syncLayer(layer: LayerScene, objects: PixiLayerObjects): void {
@@ -340,6 +560,7 @@ class PixiBackend implements Backend {
     const matrixKey = matrixSignature(matrix);
     if (matrixKey !== objects.matrixKey) {
       objects.container.setFromMatrix(matrix ?? new Matrix());
+      objects.matrix = matrix ?? null;
       objects.matrixKey = matrixKey;
     }
 
@@ -448,6 +669,142 @@ class PixiBackend implements Backend {
       }
     }
   }
+
+  // ── View-mode display (overlay/swipe composite, blink/single picks) ──
+
+  private isComposite(): boolean {
+    return this.effects.mode === 'overlay' || this.effects.mode === 'swipe';
+  }
+
+  /** Which layers the world draws when the mode is not composite. */
+  private layerShownInDirectMode(id: 'old' | 'new'): boolean {
+    const effects = this.effects;
+    if (effects.mode === 'blink') {
+      // With one sheet a blink is pointless: show it steadily.
+      if (this.hasLayer.old !== this.hasLayer.new) return this.hasLayer[id];
+      const wanted: 'old' | 'new' = effects.blinkShowOld ? 'old' : 'new';
+      return id === wanted && this.hasLayer[id];
+    }
+    if (effects.mode === 'single') {
+      return id === effects.singleSide && this.hasLayer[id];
+    }
+    return true;
+  }
+
+  /**
+   * The visibility truth for one frame: composited modes hide the world
+   * and show the filtered sprite; direct modes (blink/single) pick layers
+   * inside the world. In composite modes the layer containers stay
+   * visible because they are the bake roots — the hidden world keeps them
+   * off the stage.
+   */
+  private refreshVis(): void {
+    const world = this.world;
+    const composite = this.compositeSprite;
+    if (!world || !composite) return;
+    const compositing = this.isComposite();
+    world.visible = !compositing;
+    composite.visible = compositing;
+    for (const id of this.layerOrder) {
+      const objects = this.layerObjects.get(id);
+      if (!objects) continue;
+      objects.container.visible = compositing
+        ? this.hasLayer[id]
+        : this.hasLayer[id] && this.layerShownInDirectMode(id);
+    }
+  }
+
+  private compositeSettings(): LayerCompareSettings {
+    const effects = this.effects;
+    return {
+      swipe: effects.mode === 'swipe',
+      dividerFrac: effects.dividerFrac,
+      oldOpacity: effects.oldOpacity,
+      palette: effects.palette,
+    };
+  }
+
+  /** Create (or recreate after a resize) the bake targets and filter. */
+  private ensureCompositeTargets(): void {
+    const app = this.app;
+    if (!app || this.cssWidth < 1 || this.cssHeight < 1) return;
+    if (this.rtOld && this.rtNew && this.compositeFilter) {
+      const composite = this.compositeSprite;
+      if (composite) {
+        composite.width = this.cssWidth;
+        composite.height = this.cssHeight;
+      }
+      return;
+    }
+    this.releaseCompositeTargets();
+    const options = {
+      width: this.cssWidth,
+      height: this.cssHeight,
+      resolution: this.compositeResolution,
+      antialias: true,
+    };
+    const rtOld = RenderTexture.create(options);
+    const rtNew = RenderTexture.create(options);
+    this.rtOld = rtOld;
+    this.rtNew = rtNew;
+    this.compositeTargetKey = `${this.cssWidth}x${this.cssHeight}@${this.compositeResolution}`;
+    const filter = new LayerCompareFilter(rtOld.source, rtNew.source, this.pageColour);
+    filter.setSettings(this.compositeSettings());
+    this.compositeFilter = filter;
+    const composite = this.compositeSprite;
+    if (composite) {
+      composite.width = this.cssWidth;
+      composite.height = this.cssHeight;
+      composite.filters = [filter.filter];
+    }
+  }
+
+  private releaseCompositeTargets(): void {
+    const composite = this.compositeSprite;
+    if (composite) composite.filters = [];
+    this.compositeFilter?.destroy();
+    this.compositeFilter = null;
+    this.rtOld?.destroy(true);
+    this.rtOld = null;
+    this.rtNew?.destroy(true);
+    this.rtNew = null;
+    this.compositeTargetKey = '';
+  }
+
+  /**
+   * Re-render both layers into their bake targets at the current view.
+   * Runs on every view/content change while a composite mode is active,
+   * so the composite sprite always reflects the latest state.
+   */
+  private bakeComposite(): void {
+    const app = this.app;
+    const rtOld = this.rtOld;
+    const rtNew = this.rtNew;
+    if (!app || !rtOld || !rtNew || this.cssWidth < 1 || this.cssHeight < 1) return;
+
+    const renderer = app.renderer;
+    const viewMatrix = viewMatrixFor(this.view);
+    const clear = { clear: true, clearColor: [0, 0, 0, 0] };
+    const oldObjects = this.layerObjects.get('old');
+    const newObjects = this.layerObjects.get('new');
+    const oldAlignment = oldObjects?.matrix ?? null;
+    // render() replaces the root container's own transform with the one
+    // given, so the alignment matrix must be folded in here: sheet pixels
+    // map through alignment first, then through the view.
+    const oldTransform = oldAlignment === null ? viewMatrix : viewMatrix.clone().append(oldAlignment);
+    renderer.render({
+      container: oldObjects && this.hasLayer.old ? oldObjects.container : this.emptyBake,
+      target: rtOld,
+      transform: oldTransform,
+      ...clear,
+    });
+    renderer.render({
+      container: newObjects && this.hasLayer.new ? newObjects.container : this.emptyBake,
+      target: rtNew,
+      transform: viewMatrix,
+      ...clear,
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -467,9 +824,22 @@ class Canvas2dBackend implements Backend {
   private devicePixelRatio = 1;
   private view: ViewState = { x: 0, y: 0, scale: 1 };
   private scene: Scene = { old: null, new: null };
+  /** Mode effects; DEFAULT_DRAW_EFFECTS until React pushes the first. */
+  private effects: LightboxDrawEffects = DEFAULT_DRAW_EFFECTS;
+  /** Reusable low-resolution overlay scratch canvases, keyed by size. */
+  private scratchKey = '';
+  private scratchA: HTMLCanvasElement | null = null;
+  private scratchB: HTMLCanvasElement | null = null;
+  private scratchOut: HTMLCanvasElement | null = null;
+  private scratchAContext: CanvasRenderingContext2D | null = null;
+  private scratchBContext: CanvasRenderingContext2D | null = null;
+  private scratchOutContext: CanvasRenderingContext2D | null = null;
+  /** The sheet token colour the overlay classification paints with. */
+  private readonly pageColour: Rgb01;
 
   constructor(host: FrameHost) {
     this.host = host;
+    this.pageColour = pageColourFromToken(host.colors.sheet);
   }
 
   async init(stage: HTMLDivElement): Promise<void> {
@@ -481,6 +851,7 @@ class Canvas2dBackend implements Backend {
     this.canvas = canvas;
     this.context = context;
     context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
     this.loop();
   }
 
@@ -492,6 +863,12 @@ class Canvas2dBackend implements Backend {
     this.canvas?.remove();
     this.canvas = null;
     this.context = null;
+    this.scratchA = null;
+    this.scratchB = null;
+    this.scratchOut = null;
+    this.scratchAContext = null;
+    this.scratchBContext = null;
+    this.scratchOutContext = null;
   }
 
   resize(width: number, height: number, devicePixelRatio: number): void {
@@ -513,6 +890,10 @@ class Canvas2dBackend implements Backend {
     this.scene = scene;
   }
 
+  setEffects(effects: LightboxDrawEffects): void {
+    this.effects = effects;
+  }
+
   private loop = (): void => {
     if (this.destroyed) return;
     this.rafId = requestAnimationFrame(this.loop);
@@ -530,15 +911,198 @@ class Canvas2dBackend implements Backend {
     context.fillRect(0, 0, this.width, this.height);
 
     const view = this.view;
-    if (!(view.scale > 0)) return;
     const scene = this.scene;
+    if (!(view.scale > 0)) return;
     if (!scene.old && !scene.new) return;
 
-    context.save();
+    const effects = this.effects;
+    if (effects.mode === 'overlay') {
+      this.drawOverlay(context, view, scene, effects);
+    } else if (effects.mode === 'swipe') {
+      this.drawSwipe(context, view, scene, effects);
+    } else {
+      this.drawDirect(context, view, scene, effects);
+    }
+  }
+
+  /** Apply the view transform to a context whose base scale is set. */
+  private applyViewTransform(
+    context: CanvasRenderingContext2D,
+    view: ViewState,
+  ): void {
     context.transform(view.scale, 0, 0, view.scale, -view.x * view.scale, -view.y * view.scale);
-    this.drawLayer(context, scene.old);
-    this.drawLayer(context, scene.new);
+  }
+
+  /**
+   * Blink and single draw the raw sheets straight to the screen, exactly
+   * like the 4.11 core did — only the layer choice differs. Blink with a
+   * single sheet shows it steadily (nothing to alternate against).
+   */
+  private drawDirect(
+    context: CanvasRenderingContext2D,
+    view: ViewState,
+    scene: Scene,
+    effects: LightboxDrawEffects,
+  ): void {
+    let showOld = true;
+    let showNew = true;
+    if (effects.mode === 'blink') {
+      if (scene.old && scene.new) {
+        showOld = effects.blinkShowOld;
+        showNew = !effects.blinkShowOld;
+      } else {
+        showOld = Boolean(scene.old);
+        showNew = Boolean(scene.new);
+      }
+    } else if (effects.mode === 'single') {
+      showOld = effects.singleSide === 'old';
+      showNew = effects.singleSide === 'new';
+    }
+
+    context.save();
+    this.applyViewTransform(context, view);
+    if (showOld) this.drawLayer(context, scene.old);
+    if (showNew) this.drawLayer(context, scene.new);
     context.restore();
+  }
+
+  /**
+   * Swipe draws each raw sheet clipped to its own side of the divider —
+   * a native canvas clip, the 2D equivalent of the shader's `uSwipe` cut.
+   * The brand-red divider line itself is chrome drawn by the component.
+   */
+  private drawSwipe(
+    context: CanvasRenderingContext2D,
+    view: ViewState,
+    scene: Scene,
+    effects: LightboxDrawEffects,
+  ): void {
+    const dividerX = Math.min(this.width, Math.max(0, effects.dividerFrac * this.width));
+    context.save();
+    if (scene.old) {
+      context.save();
+      context.beginPath();
+      context.rect(0, 0, dividerX, this.height);
+      context.clip();
+      this.applyViewTransform(context, view);
+      this.drawLayer(context, scene.old);
+      context.restore();
+    }
+    if (scene.new) {
+      context.save();
+      context.beginPath();
+      context.rect(dividerX, 0, this.width - dividerX, this.height);
+      context.clip();
+      this.applyViewTransform(context, view);
+      this.drawLayer(context, scene.new);
+      context.restore();
+    }
+    context.restore();
+  }
+
+  /**
+   * Overlay, the only per-pixel mode on this path. Both layers are baked
+   * into low-resolution scratch canvases (scale ≤ 0.5 — classification is
+   * a colour decision, not a geometry one), then every pixel is classified
+   * with the same math the WebGL shader runs (`compositeOverlayPixel`),
+   * and the result is upscaled back onto the stage. This mirrors the
+   * shader semantics; the reduced resolution is the documented
+   * approximation of the fallback path.
+   */
+  private drawOverlay(
+    context: CanvasRenderingContext2D,
+    view: ViewState,
+    scene: Scene,
+    effects: LightboxDrawEffects,
+  ): void {
+    const largest = Math.max(this.width, this.height);
+    const scale = Math.min(
+      CANVAS_OVERLAY_MAX_SCALE,
+      Math.max(0.25, 560 / Math.max(1, largest)),
+    );
+    const width = Math.max(1, Math.round(this.width * scale));
+    const height = Math.max(1, Math.round(this.height * scale));
+    this.ensureScratch(width, height);
+    if (!this.scratchA || !this.scratchB || !this.scratchOut) return;
+    const bakeA = this.scratchAContext;
+    const bakeB = this.scratchBContext;
+    const outContext = this.scratchOutContext;
+    if (!bakeA || !bakeB || !outContext) return;
+
+    this.bakeLayerCanvas(bakeA, width, height, scene.old, view, scale);
+    this.bakeLayerCanvas(bakeB, width, height, scene.new, view, scale);
+
+    const dataA = bakeA.getImageData(0, 0, width, height);
+    const dataB = bakeB.getImageData(0, 0, width, height);
+    const result = outContext.createImageData(width, height);
+    const a = dataA.data;
+    const b = dataB.data;
+    const out = result.data;
+    for (let i = 0; i < out.length; i += 4) {
+      const pixel = compositeOverlayPixel(
+        [a[i]!, a[i + 1]!, a[i + 2]!, a[i + 3]!],
+        [b[i]!, b[i + 1]!, b[i + 2]!, b[i + 3]!],
+        effects.oldOpacity,
+        effects.palette,
+        this.pageColour,
+      );
+      // alpha 0: no sheet here — leave the pixel transparent so the room
+      // background shows through the upscaled result.
+      if (pixel[3] > 0) {
+        out[i] = pixel[0];
+        out[i + 1] = pixel[1];
+        out[i + 2] = pixel[2];
+        out[i + 3] = pixel[3];
+      }
+    }
+    outContext.putImageData(result, 0, 0);
+    context.drawImage(this.scratchOut, 0, 0, width, height, 0, 0, this.width, this.height);
+  }
+
+  /** Render one layer (or clear the scratch) at `scale` CSS pixels. */
+  private bakeLayerCanvas(
+    targetContext: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    layer: LayerScene | null,
+    view: ViewState,
+    scale: number,
+  ): void {
+    targetContext.setTransform(1, 0, 0, 1, 0, 0);
+    targetContext.clearRect(0, 0, width, height);
+    if (!layer) return;
+    targetContext.setTransform(scale, 0, 0, scale, 0, 0);
+    this.applyViewTransform(targetContext, view);
+    this.drawLayer(targetContext, layer);
+  }
+
+  /** (Re)allocate the three overlay scratch canvases when their size changes. */
+  private ensureScratch(width: number, height: number): void {
+    const key = `${width}x${height}`;
+    if (key === this.scratchKey && this.scratchA) return;
+    this.scratchKey = key;
+    this.scratchA = this.makeScratch('lightbox__overlay-bake-a', width, height);
+    this.scratchB = this.makeScratch('lightbox__overlay-bake-b', width, height);
+    this.scratchOut = this.makeScratch('lightbox__overlay-out', width, height);
+    this.scratchAContext = this.scratchA.getContext('2d', { willReadFrequently: true });
+    this.scratchBContext = this.scratchB.getContext('2d', { willReadFrequently: true });
+    this.scratchOutContext = this.scratchOut.getContext('2d');
+    if (!this.scratchAContext || !this.scratchBContext || !this.scratchOutContext) {
+      this.scratchA = null;
+      this.scratchB = null;
+      this.scratchOut = null;
+      this.scratchAContext = null;
+      this.scratchBContext = null;
+      this.scratchOutContext = null;
+    }
+  }
+
+  private makeScratch(className: string, width: number, height: number): HTMLCanvasElement {
+    const scratch = document.createElement('canvas');
+    scratch.className = className;
+    scratch.width = width;
+    scratch.height = height;
+    return scratch;
   }
 
   private drawLayer(context: CanvasRenderingContext2D, layer: LayerScene | null): void {
@@ -600,6 +1164,8 @@ class LightboxCore implements FrameHost {
   private oldMatrix: Matrix | null = null;
   private dpi = 200;
   private pxPerMm: number | null = null;
+  /** Last mode effects; forwarded to backends as they appear. */
+  private effects: LightboxDrawEffects = DEFAULT_DRAW_EFFECTS;
 
   private readonly view: ViewState = { x: 0, y: 0, scale: 1 };
   private width = 0;
@@ -657,6 +1223,7 @@ class LightboxCore implements FrameHost {
     if (!backend) return;
     this.backend = backend;
     this.onMode(backend.kind);
+    this.backend.setEffects(this.effects);
 
     this.syncSize();
     this.observeSize();
@@ -714,6 +1281,16 @@ class LightboxCore implements FrameHost {
     this.dpi = next.dpi;
     this.pxPerMm = next.pxPerMm;
     this.refreshScaleIndicator();
+  }
+
+  /**
+   * Mode/control changes from React (mode, opacity, blink side, divider,
+   * palette). Backends react immediately; a backend that starts later
+   * receives the stored effects in `start()`.
+   */
+  setDrawEffects(effects: LightboxDrawEffects): void {
+    this.effects = effects;
+    this.backend?.setEffects(effects);
   }
 
   private contentChanged(): void {
@@ -1083,6 +1660,40 @@ class LightboxCore implements FrameHost {
 // The React component
 // ═══════════════════════════════════════════════════════════════════════
 
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function clampBlinkMs(value: number): number {
+  return Math.min(BLINK_MAX_MS, Math.max(BLINK_MIN_MS, Math.round(value)));
+}
+
+/** Clamp a screen-pixel divider position inside the stage, off the walls. */
+function clampDividerPx(value: number, width: number): number {
+  if (width <= 0) return 0;
+  const min = 2;
+  const max = Math.max(min, width - 2);
+  return Math.min(max, Math.max(min, value));
+}
+
+const MODE_LABELS: Record<LightboxMode, string> = {
+  overlay: 'Overlay',
+  swipe: 'Swipe',
+  blink: 'Blink',
+  single: 'Single',
+};
+
+const MODE_TITLES: Record<LightboxMode, string> = {
+  overlay: 'Both sheets, recoloured: old blue, new red, unchanged grey',
+  swipe: 'The seam: old sheet left of the divider, new sheet right',
+  blink: 'Alternates between the sheets — movement shows the changes',
+  single: 'One sheet at a time; O and N switch between them',
+};
+
+function modeKeyHint(mode: LightboxMode): string {
+  return `${MODE_ORDER.indexOf(mode) + 1}`;
+}
+
 export function Lightbox(props: LightboxProps) {
   const {
     oldSheetId,
@@ -1091,16 +1702,95 @@ export function Lightbox(props: LightboxProps) {
     transformMatrix = null,
     dpi = 200,
     pxPerMm = null,
+    controls = true,
   } = props;
 
   const loader = useTileLoader();
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const canvasAreaRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
   const scaleRef = useRef<HTMLDivElement | null>(null);
   const coreRef = useRef<LightboxCore | null>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const dividerDragRef = useRef<{ pointerId: number } | null>(null);
   const [rendererMode, setRendererMode] = useState<LightboxRendererMode | null>(null);
+
+  // ── Mode + control state ─────────────────────────────────────────────
+  // The remembered mode is the one persisted preference of the app; the
+  // remaining controls (opacity, blink speed, palette, single side) are
+  // per-viewer state initialised from `modeOptions`.
+  const [internalMode, setInternalMode] = useState<LightboxMode>(() => {
+    const stored = readStoredLightboxMode();
+    if (stored !== null) return stored;
+    if (props.initialMode === 'single-old' || props.initialMode === 'single-new') {
+      return 'single';
+    }
+    return 'overlay';
+  });
+  /** Controlled through `props.mode` when the consumer provides it. */
+  const mode = props.mode ?? internalMode;
+
+  const [oldOpacity, setOldOpacity] = useState<number>(() =>
+    clamp01(props.modeOptions?.oldOpacity ?? 1),
+  );
+  const [blinkMs, setBlinkMs] = useState<number>(() =>
+    clampBlinkMs(props.modeOptions?.blinkMs ?? BLINK_DEFAULT_MS),
+  );
+  const [blinkPlaying, setBlinkPlaying] = useState(true);
+  const [blinkShowOld, setBlinkShowOld] = useState(true);
+  const [colourBlindSafe, setColourBlindSafe] = useState<boolean>(
+    () => props.modeOptions?.colourBlindSafe ?? false,
+  );
+  const [singleSide, setSingleSide] = useState<LightboxSingleSide>(() => {
+    if (props.modeOptions?.singleSide) return props.modeOptions.singleSide;
+    if (props.initialMode === 'single-old') return 'old';
+    if (props.initialMode === 'single-new') return 'new';
+    return 'old';
+  });
+  /** Swipe divider in stage pixels; null = centred. */
+  const [dividerPx, setDividerPx] = useState<number | null>(null);
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+
+  const chooseMode = (next: LightboxMode): void => {
+    if (next === mode) return;
+    writeStoredLightboxMode(next);
+    if (props.onModeChange) props.onModeChange(next);
+    else setInternalMode(next);
+  };
+
+  const adjustOpacity = (delta: number): void => {
+    setOldOpacity((value) => clamp01(Math.round((value + delta) * 100) / 100));
+  };
+
+  // The blink timer lives here, in React: at most ~5 flips a second, so a
+  // re-render per flip is cheap and the interval restarts on speed changes.
+  // Blink starts on the old sheet (the initial state) and resumes from
+  // wherever it was paused when the mode is re-entered.
+  useEffect(() => {
+    if (mode !== 'blink' || !blinkPlaying) return;
+    const timer = window.setInterval(() => {
+      setBlinkShowOld((showing) => !showing);
+    }, blinkMs);
+    return () => window.clearInterval(timer);
+  }, [mode, blinkPlaying, blinkMs]);
+
+  // The stage's CSS size, needed for the divider's centring and fractions.
+  useEffect(() => {
+    const area = canvasAreaRef.current;
+    if (!area) return;
+    const measure = (): void => {
+      setStageSize({ width: area.clientWidth, height: area.clientHeight });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, []);
 
   // One effect owns the whole lifecycle; StrictMode's double mount just
   // destroys and recreates everything (loader.destroy() is a full reset).
@@ -1116,7 +1806,7 @@ export function Lightbox(props: LightboxProps) {
       minimapCanvas: minimap,
       scaleElement,
       colors: readTokenColors(),
-      onMode: (mode) => setRendererMode(mode),
+      onMode: (renderer) => setRendererMode(renderer),
     });
     coreRef.current = core;
     void core.start();
@@ -1137,27 +1827,69 @@ export function Lightbox(props: LightboxProps) {
     coreRef.current?.setViewMeta({ dpi, pxPerMm });
   }, [dpi, pxPerMm]);
 
+  // The mode effects travel as one object so backends can diff them; a
+  // push happens on every control change (and on blink flips). In single
+  // mode the side falls back to the sheet that actually exists.
+  const effectiveSingleSide: LightboxSingleSide =
+    singleSide === 'old' && !oldSheetId && newSheetId
+      ? 'new'
+      : singleSide === 'new' && !newSheetId && oldSheetId
+        ? 'old'
+        : singleSide;
+  const dividerFrac =
+    stageSize.width > 0
+      ? clamp01((dividerPx ?? stageSize.width / 2) / stageSize.width)
+      : 0.5;
+  const effects = useMemo<LightboxDrawEffects>(
+    () => ({
+      mode,
+      oldOpacity,
+      blinkShowOld,
+      singleSide: effectiveSingleSide,
+      dividerFrac,
+      palette: colourBlindSafe ? COLOUR_BLIND_DIFF_PALETTE : DEFAULT_DIFF_PALETTE,
+    }),
+    [
+      mode,
+      oldOpacity,
+      blinkShowOld,
+      effectiveSingleSide,
+      dividerFrac,
+      colourBlindSafe,
+    ],
+  );
+  useEffect(() => {
+    coreRef.current?.setDrawEffects(effects);
+  }, [effects]);
+
   // Wheel must be a native non-passive listener: React's synthetic wheel is
   // passive, and zooming has to preventDefault (browser page zoom).
   useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
+    const area = canvasAreaRef.current;
+    if (!area) return;
     const onWheel = (event: WheelEvent): void => {
       event.preventDefault();
       const core = coreRef.current;
       if (!core) return;
-      const rect = root.getBoundingClientRect();
+      const rect = area.getBoundingClientRect();
       const sx = event.clientX - rect.left;
       const sy = event.clientY - rect.top;
       const deltaY = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY;
       core.zoomAt(sx, sy, Math.exp(-deltaY * WHEEL_ZOOM_RATE));
     };
-    root.addEventListener('wheel', onWheel, { passive: false });
-    return () => root.removeEventListener('wheel', onWheel);
+    area.addEventListener('wheel', onWheel, { passive: false });
+    return () => area.removeEventListener('wheel', onWheel);
   }, []);
+
+  const isChromeTarget = (target: HTMLElement): boolean =>
+    target.closest(
+      'button, input, select, textarea, label, .lightbox__divider, .lightbox__controls',
+    ) !== null;
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    // Buttons, sliders and the divider are chrome, not canvas.
+    if (isChromeTarget(event.target as HTMLElement)) return;
     const root = rootRef.current;
     if (root) {
       try {
@@ -1186,7 +1918,7 @@ export function Lightbox(props: LightboxProps) {
       // Pinch: keep the world point under the old midpoint under the new
       // midpoint, scaling by the change in finger distance. zoomAt works in
       // stage-local pixels, so client coordinates are converted first.
-      const rect = rootRef.current?.getBoundingClientRect();
+      const rect = canvasAreaRef.current?.getBoundingClientRect();
       const originX = rect?.left ?? 0;
       const originY = rect?.top ?? 0;
       const others = [...pointers.values()];
@@ -1221,20 +1953,103 @@ export function Lightbox(props: LightboxProps) {
     }
   };
 
+  // ── Swipe divider (chrome; drags horizontally, never pans) ───────────
+
+  const dividerLeftPx =
+    stageSize.width > 0
+      ? clampDividerPx(dividerPx ?? stageSize.width / 2, stageSize.width)
+      : 0;
+  const showDivider = mode === 'swipe' && Boolean(oldSheetId) && Boolean(newSheetId);
+
+  const onDividerPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    event.stopPropagation();
+    dividerDragRef.current = { pointerId: event.pointerId };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is best-effort; movement still tracks while inside.
+    }
+  };
+
+  const onDividerPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const drag = dividerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const area = canvasAreaRef.current;
+    if (!area || stageSize.width <= 0) return;
+    const rect = area.getBoundingClientRect();
+    setDividerPx(clampDividerPx(event.clientX - rect.left, stageSize.width));
+  };
+
+  const endDividerDrag = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (dividerDragRef.current?.pointerId === event.pointerId) {
+      dividerDragRef.current = null;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // No capture was held — nothing to release.
+      }
+    }
+  };
+
+  const nudgeDivider = (delta: number): void => {
+    setDividerPx((current) => {
+      const width = stageSize.width;
+      const anchor = current ?? (width > 0 ? width / 2 : 0);
+      return clampDividerPx(anchor + delta, width);
+    });
+  };
+
+  // ── Keyboard ─────────────────────────────────────────────────────────
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     const target = event.target as HTMLElement;
     if (target.closest('input, textarea, select, button, [contenteditable="true"]')) return;
     const core = coreRef.current;
     if (!core) return;
 
-    // Arrows pan like scrollbars: the view moves in the arrow's direction.
+    // 100 % zoom moved to Ctrl+1 — the plain digit keys now choose modes.
+    if (event.ctrlKey || event.metaKey) {
+      if (event.key === '1') {
+        event.preventDefault();
+        core.zoom100();
+      }
+      return;
+    }
+
     let handled = true;
     switch (event.key) {
+      case '1':
+      case '2':
+      case '3':
+      case '4': {
+        const next = MODE_ORDER[Number(event.key) - 1];
+        if (next) chooseMode(next);
+        break;
+      }
+      case ' ':
+        if (mode === 'blink') setBlinkPlaying((playing) => !playing);
+        break;
+      case '[':
+        adjustOpacity(-OPACITY_KEY_STEP);
+        break;
+      case ']':
+        adjustOpacity(OPACITY_KEY_STEP);
+        break;
+      case 'o':
+      case 'O':
+        if (mode === 'single' && oldSheetId) setSingleSide('old');
+        break;
+      case 'n':
+      case 'N':
+        if (mode === 'single' && newSheetId) setSingleSide('new');
+        break;
       case 'ArrowLeft':
-        core.panByScreen(KEY_PAN_PX, 0);
+        if (mode === 'swipe' && !event.shiftKey) nudgeDivider(-KEY_DIVIDER_NUDGE_PX);
+        else core.panByScreen(KEY_PAN_PX, 0);
         break;
       case 'ArrowRight':
-        core.panByScreen(-KEY_PAN_PX, 0);
+        if (mode === 'swipe' && !event.shiftKey) nudgeDivider(KEY_DIVIDER_NUDGE_PX);
+        else core.panByScreen(-KEY_PAN_PX, 0);
         break;
       case 'ArrowUp':
         core.panByScreen(0, KEY_PAN_PX);
@@ -1253,9 +2068,6 @@ export function Lightbox(props: LightboxProps) {
       case '0':
         core.fit();
         break;
-      case '1':
-        core.zoom100();
-        break;
       default:
         handled = false;
     }
@@ -1263,28 +2075,168 @@ export function Lightbox(props: LightboxProps) {
   };
 
   const rootClassName = className ? `lightbox ${className}` : 'lightbox';
+  const digitHints = MODE_ORDER.map((value) => `${modeKeyHint(value)} ${value}`).join(' · ');
+  const description =
+    `Drag to pan, scroll to zoom, pinch on touch. ${digitHints} choose the mode. ` +
+    'Arrows pan (in swipe they move the divider), + and − zoom, 0 fits, Ctrl+1 shows 100 percent. ' +
+    'Space plays or pauses blink, [ and ] fade the old layer, O and N switch the single sheet.';
 
   return (
     <div
       ref={rootRef}
       className={rootClassName}
       tabIndex={0}
-      aria-label="Drawing lightbox — old and new sheets overlaid"
-      aria-description="Drag to pan, scroll to zoom, pinch on touch. Arrow keys pan, + and − zoom, 0 fits the sheet, 1 shows 100 percent."
+      aria-label="Drawing lightbox"
+      aria-description={description}
       onKeyDown={onKeyDown}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={releasePointer}
       onPointerCancel={releasePointer}
     >
-      <div ref={stageRef} className="lightbox__stage" />
-      <canvas ref={minimapRef} className="lightbox__minimap" aria-hidden="true" />
-      <div ref={scaleRef} className="lightbox__scale tabular" aria-hidden="true" />
-      {rendererMode === 'canvas2d' && (
-        <p className="lightbox__fallback-note" role="status">
-          WebGL is not available, so this viewer is running in canvas mode.
-          Pan and zoom still work; very large sheets may be slower.
-        </p>
+      <div ref={canvasAreaRef} className="lightbox__canvas-area">
+        <div ref={stageRef} className="lightbox__stage" />
+        <canvas ref={minimapRef} className="lightbox__minimap" aria-hidden="true" />
+        <div ref={scaleRef} className="lightbox__scale tabular" aria-hidden="true" />
+        {showDivider && (
+          <div
+            className="lightbox__divider"
+            role="separator"
+            aria-label="Compare divider — old sheet left, new sheet right"
+            aria-orientation="vertical"
+            title="Drag, or use the left and right arrow keys"
+            style={{ left: `${dividerLeftPx}px` }}
+            onPointerDown={onDividerPointerDown}
+            onPointerMove={onDividerPointerMove}
+            onPointerUp={endDividerDrag}
+            onPointerCancel={endDividerDrag}
+          />
+        )}
+        {rendererMode === 'canvas2d' && (
+          <p className="lightbox__fallback-note" role="status">
+            WebGL is not available, so this viewer is running in canvas mode.
+            Pan and zoom still work; very large sheets may be slower.
+          </p>
+        )}
+      </div>
+
+      {controls && (
+        <div className="lightbox__controls">
+          <div
+            className="lightbox__seg"
+            role="group"
+            aria-label="View mode"
+          >
+            {MODE_ORDER.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`lightbox__mode-btn${mode === value ? ' is-active' : ''}`}
+                aria-pressed={mode === value}
+                aria-keyshortcuts={modeKeyHint(value)}
+                title={`${MODE_TITLES[value]} — key ${modeKeyHint(value)}`}
+                onClick={() => chooseMode(value)}
+              >
+                {MODE_LABELS[value]}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'overlay' && (
+            <label className="lightbox__field" title="Fade the old-only ink — [ and ] adjust it from the keyboard">
+              <span>Old opacity</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={oldOpacity}
+                onChange={(event) => setOldOpacity(clamp01(Number(event.target.value)))}
+              />
+              <span className="lightbox__field-value tabular">
+                {Math.round(oldOpacity * 100)}%
+              </span>
+            </label>
+          )}
+
+          {mode === 'blink' && (
+            <>
+              <label className="lightbox__field" title="How long each sheet shows before the other replaces it">
+                <span>Blink speed</span>
+                <input
+                  type="range"
+                  min={BLINK_MIN_MS}
+                  max={BLINK_MAX_MS}
+                  step={50}
+                  value={blinkMs}
+                  onChange={(event) => setBlinkMs(clampBlinkMs(Number(event.target.value)))}
+                />
+                <span className="lightbox__field-value tabular">{blinkMs} ms</span>
+              </label>
+              <button
+                type="button"
+                className="lightbox__play-btn"
+                aria-pressed={blinkPlaying}
+                title={blinkPlaying ? 'Pause the blink — Space' : 'Play the blink — Space'}
+                onClick={() => setBlinkPlaying((playing) => !playing)}
+              >
+                {blinkPlaying ? 'Pause blink' : 'Play blink'}
+              </button>
+            </>
+          )}
+
+          {mode === 'single' && (
+            <div className="lightbox__seg" role="group" aria-label="Sheet shown in single mode">
+              <button
+                type="button"
+                className={`lightbox__mode-btn${singleSide === 'old' ? ' is-active' : ''}`}
+                aria-pressed={singleSide === 'old'}
+                aria-keyshortcuts="o"
+                title="Show the previous-issue sheet — O"
+                disabled={!oldSheetId}
+                onClick={() => setSingleSide('old')}
+              >
+                Old sheet
+              </button>
+              <button
+                type="button"
+                className={`lightbox__mode-btn${singleSide === 'new' ? ' is-active' : ''}`}
+                aria-pressed={singleSide === 'new'}
+                aria-keyshortcuts="n"
+                title="Show the current-issue sheet — N"
+                disabled={!newSheetId}
+                onClick={() => setSingleSide('new')}
+              >
+                New sheet
+              </button>
+            </div>
+          )}
+
+          {mode === 'overlay' && (
+            <button
+              type="button"
+              className="lightbox__palette-btn"
+              aria-pressed={colourBlindSafe}
+              title="Deuteranopia-safe palette: blue stays, red becomes orange"
+              onClick={() => setColourBlindSafe((safe) => !safe)}
+            >
+              Colour-blind safe palette
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="lightbox__reset-btn"
+            title="Fit the sheets in the view — 0"
+            onClick={() => coreRef.current?.fit()}
+          >
+            Reset view
+          </button>
+
+          <span className="lightbox__controls-note micro">
+            Annotations layer not available yet.
+          </span>
+        </div>
       )}
     </div>
   );

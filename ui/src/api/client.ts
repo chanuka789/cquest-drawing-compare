@@ -12,11 +12,15 @@
  */
 
 import type {
+  AlignResultsPayload,
+  AlignResultRow,
+  AlignStatus,
   ErrorResponse,
   HealthResponse,
   IssueSide,
   IssueType,
   ListParseResult,
+  ManualPoint,
   MatchDecisionsResponse,
   MatchResult,
   MatchStatus,
@@ -367,6 +371,41 @@ export function cancelRename(): Promise<{ cancelled: boolean }> {
 /** Reverse the last apply run, verifying each file's hash first. */
 export function undoRename(): Promise<{ run_id: string }> {
   return post<{ run_id: string }>('/api/rename/undo');
+}
+
+// ── Alignment (Phase 4) ────────────────────────────────────────────────
+
+/** Start aligning the accepted pairs in the background. */
+export function runAlignment(): Promise<{ run_id: string }> {
+  return post<{ run_id: string }>('/api/align/run', {});
+}
+
+/** Where the batch run has got to — polled, not a socket. */
+export function fetchAlignStatus(): Promise<AlignStatus> {
+  return get<AlignStatus>('/api/align/status');
+}
+
+/** The batch results. 422 until the run's state is `done`. */
+export function fetchAlignResults(): Promise<AlignResultsPayload> {
+  return get<AlignResultsPayload>('/api/align/results');
+}
+
+/** Ask the engine to stop the batch run cleanly. */
+export function cancelAlignment(): Promise<{ cancelled: boolean }> {
+  return post<{ cancelled: boolean }>('/api/align/cancel');
+}
+
+/**
+ * Fit a similarity transform from user-clicked points and replace the batch
+ * row at `index`. Points are in sheet pixels at 200 dpi.
+ */
+export function postManualAlignment(body: {
+  old_sheet_id: string;
+  new_sheet_id: string;
+  points: ManualPoint[];
+  index: number;
+}): Promise<AlignResultRow> {
+  return post<AlignResultRow>('/api/align/manual', body);
 }
 
 // ── Tiles ──────────────────────────────────────────────────────────────

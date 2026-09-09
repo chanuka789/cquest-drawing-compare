@@ -1,0 +1,292 @@
+/* Screen 6 — manual alignment. Every colour comes from tokens.css.
+   The panes are drawing viewers: sheets on --sheet, rooms around them.
+   Markers are viewer chrome drawn over the sheet (like the Lightbox minimap),
+   so they use the status tokens, never brand red. */
+
+.manual {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  gap: var(--space-3);
+}
+
+/* ── Heading ─────────────────────────────────────────────────────────── */
+
+.manual__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.manual__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.manual__back {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+}
+
+.manual__back:hover {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.manual__sentence {
+  color: var(--text-mid);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual__error {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--room-300);
+  border-left: 2px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+  color: var(--text-hi);
+  font-size: var(--text-micro);
+  overflow-wrap: anywhere;
+}
+
+.manual__hint {
+  color: var(--text-low);
+}
+
+/* ── The two panes ───────────────────────────────────────────────────── */
+
+.manual__canvases {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  min-height: 180px;
+}
+
+.manual-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-lg);
+  background: var(--room-700);
+  overflow: hidden;
+}
+
+.manual-pane__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--room-300);
+  background: var(--room-500);
+  color: var(--text-low);
+  white-space: nowrap;
+}
+
+.manual-pane__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.manual-pane__hint {
+  flex: 0 0 auto;
+  color: var(--text-low);
+}
+
+.manual-pane__canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none; /* pan and zoom are handled here, never by the page */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.manual-pane__canvas-wrap canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+.manual-pane__overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - var(--space-6));
+  padding: var(--space-2) var(--space-3);
+  background: var(--room-700);
+  opacity: 0.92;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  color: var(--text-mid);
+  pointer-events: none;
+  text-align: center;
+  z-index: var(--z-overlay);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+
+.manual__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+}
+
+.manual__status {
+  min-width: 0;
+  color: var(--text-mid);
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.manual__side-hint {
+  color: var(--warn);
+}
+
+.manual__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.manual__quiet {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+}
+
+.manual__quiet:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.manual__quiet:disabled {
+  opacity: 0.5;
+}
+
+.manual__apply {
+  padding: var(--space-2) var(--space-4);
+}
+
+/* ── Live preview ────────────────────────────────────────────────────── */
+
+.manual__preview {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 220px;
+  height: clamp(220px, 34vh, 360px);
+}
+
+.manual__preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.manual__preview-title {
+  font-size: var(--text-section);
+}
+
+.manual__preview-note {
+  min-width: 0;
+  color: var(--text-low);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manual__preview-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15rem;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.manual__preview-lightbox {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.manual__residuals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+  overflow-y: auto;
+}
+
+.manual__residuals-title {
+  color: var(--text-low);
+}
+
+.manual__residuals-empty {
+  color: var(--text-low);
+}
+
+.manual__residuals-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  list-style: none;
+  padding: 0;
+}
+
+.manual__residual {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid rgba(58, 68, 79, 0.4);
+}
+
+.manual__residual-name {
+  color: var(--text-mid);
+}
+
+.manual__residual-value {
+  color: var(--text-hi);
+}
+
+.manual__residuals-note {
+  color: var(--text-low);
+}

@@ -693,10 +693,15 @@ function UnmatchedPane({
 function BottomBar() {
   const state = useMatchingStore();
   const goToRename = useAppStore((store) => store.goToRename);
+  const goToAlignment = useAppStore((store) => store.goToAlignment);
   const counts = countByStatus(state);
   const ready = canContinue(state);
   const unresolved = counts.unresolved;
   const nothingSaved = state.accepted.length + state.rejected.length + state.manual.length === 0;
+  // Alignment runs on the engine's copy of the decisions, so it needs either
+  // a completed save or a review with nothing decided yet (nothing to save).
+  const alignReady =
+    state.result !== null && (state.savedUnresolved !== null || nothingSaved);
 
   return (
     <div className="matching__bar">
@@ -705,6 +710,21 @@ function BottomBar() {
         {counts.unmatched} unmatched
       </p>
       <div className="matching__bar-actions">
+        {state.result !== null && (
+          <button
+            type="button"
+            className="matching__align"
+            onClick={goToAlignment}
+            disabled={!alignReady}
+            title={
+              alignReady
+                ? undefined
+                : 'Save the review first — alignment runs on the pairs you accepted'
+            }
+          >
+            Align accepted pairs
+          </button>
+        )}
         <button
           type="button"
           className="button matching__save"

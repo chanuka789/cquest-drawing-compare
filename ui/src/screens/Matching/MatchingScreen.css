@@ -651,16 +651,19 @@
   gap: var(--space-3);
 }
 
-.matching__save {
+.matching__save,
+.matching__align {
   border: 1px solid var(--room-300);
   color: var(--text-mid);
 }
 
-.matching__save:hover:not(:disabled) {
+.matching__save:hover:not(:disabled),
+.matching__align:hover:not(:disabled) {
   border-color: var(--brand);
   color: var(--text-hi);
 }
 
-.matching__save:disabled {
+.matching__save:disabled,
+.matching__align:disabled {
   opacity: 0.5;
 }

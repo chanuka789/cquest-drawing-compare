@@ -1,15 +1,29 @@
 /**
- * Lightbox viewer kit (Phase 4, Task 4.11).
+ * Lightbox viewer kit (Phase 4, Tasks 4.11 + 4.12).
  *
  * `Lightbox` is the tiled drawing viewer component; the supporting pieces —
- * the tile loader and the alignment→Pixi matrix bridge — are exported here
- * too so later tasks (view modes, manual alignment) can reuse them without
- * importing from the component file.
+ * the tile loader, the alignment→Pixi matrix bridge and the diff-palette
+ * filter kit — are exported here too so later tasks (manual alignment,
+ * review screens) can reuse them without importing from the component file.
  */
 
 export { Lightbox } from './Lightbox';
-export type { LightboxProps, LightboxRendererMode } from './Lightbox';
+export type {
+  LightboxDrawEffects,
+  LightboxMode,
+  LightboxModeOptions,
+  LightboxProps,
+  LightboxRendererMode,
+  LightboxSingleSide,
+} from './Lightbox';
 export { pixiMatrixFromAlignment } from './pixiMatrix';
+export {
+  COINCIDENT_INK_ALPHA,
+  COLOUR_BLIND_DIFF_PALETTE,
+  DEFAULT_DIFF_PALETTE,
+  hexToRgb01,
+} from './filters';
+export type { DiffPalette, Rgb01 } from './filters';
 export {
   createTileLoader,
   useTileLoader,

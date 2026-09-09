@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 
 import { TopBar } from './components/TopBar';
+import { AlignmentScreen } from './screens/Alignment';
+import { ManualAlignScreen } from './screens/Manual';
 import { MatchingScreen } from './screens/Matching';
 import { RegisterScreen } from './screens/Register';
 import { RenameScreen } from './screens/Rename';
@@ -24,6 +26,8 @@ export default function App() {
       {screen === 'register' && <RegisterScreen />}
       {screen === 'matching' && <MatchingScreen />}
       {screen === 'rename' && <RenameScreen />}
+      {screen === 'alignment' && <AlignmentScreen />}
+      {screen === 'manual' && <ManualAlignScreen />}
     </div>
   );
 }

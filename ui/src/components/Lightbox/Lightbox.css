@@ -5,10 +5,14 @@
    is dark (--room-900) and the sheet is the only bright thing (--sheet).
    Everything drawn on top of the canvas — minimap, zoom readout, fallback
    note — is small chrome in the room palette and never covers the drawing.
-   No colours outside the tokens; no brand red inside the canvas area.
+   No colours outside the tokens; no brand red inside the canvas area —
+   except the swipe divider, which is the seam, and the seam may be brand
+   red per the design rules.
    ═══════════════════════════════════════════════════════════════════════ */
 
 .lightbox {
+  display: flex;
+  flex-direction: column;
   position: relative;
   overflow: hidden;
   width: 100%;
@@ -22,6 +26,12 @@
 .lightbox:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: -2px;
+}
+
+.lightbox__canvas-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .lightbox__stage {
@@ -82,4 +92,160 @@
   color: var(--text-mid);
   pointer-events: none;
   z-index: var(--z-overlay);
+}
+
+/* ── The swipe divider — the seam ────────────────────────────────────── */
+
+.lightbox__divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none; /* dragging is handled here, never by the page */
+  z-index: var(--z-chrome);
+}
+
+/* The seam itself: 2 px of brand red, chrome, over the canvas. */
+.lightbox__divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--brand);
+  box-shadow: 0 0 10px var(--brand-glow);
+  pointer-events: none;
+}
+
+/* A small grip so the seam reads as grabbable, not as damage. */
+.lightbox__divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-pill);
+  background: var(--room-700);
+  border: 1px solid var(--brand);
+  box-shadow: var(--shadow-raised);
+  pointer-events: none;
+}
+
+/* ── Control bar (chrome) ────────────────────────────────────────────── */
+
+.lightbox__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  background: var(--room-700);
+  border-top: 1px solid var(--room-500);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Segmented button groups (modes, single-sheet picker). */
+.lightbox__seg {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--room-900);
+}
+
+.lightbox__mode-btn,
+.lightbox__palette-btn,
+.lightbox__play-btn,
+.lightbox__reset-btn {
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.lightbox__mode-btn {
+  padding: var(--space-2) var(--space-3);
+}
+
+.lightbox__seg .lightbox__mode-btn + .lightbox__mode-btn {
+  border-left: 1px solid var(--room-300);
+}
+
+/* The active segment is chrome-highlighted: brand for the pressed
+   state, white text on it. Red never means data here. */
+.lightbox__mode-btn.is-active,
+.lightbox__mode-btn[aria-pressed='true'] {
+  background: var(--brand);
+  color: var(--text-on-brand);
+}
+
+.lightbox__mode-btn:hover:not(.is-active) {
+  background: var(--room-500);
+  color: var(--text-hi);
+}
+
+.lightbox__mode-btn:disabled {
+  opacity: 0.5;
+}
+
+/* Range fields with their live readout. */
+.lightbox__field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-mid);
+}
+
+.lightbox__field input[type='range'] {
+  width: 120px;
+  accent-color: var(--brand);
+}
+
+.lightbox__field-value {
+  min-width: 3.2em;
+  color: var(--text-hi);
+}
+
+.lightbox__palette-btn,
+.lightbox__play-btn,
+.lightbox__reset-btn {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-sm);
+  background: var(--room-500);
+}
+
+.lightbox__palette-btn[aria-pressed='true'],
+.lightbox__play-btn[aria-pressed='true'] {
+  background: var(--brand-dim);
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.lightbox__palette-btn:hover,
+.lightbox__play-btn:hover,
+.lightbox__reset-btn:hover {
+  border-color: var(--room-200);
+  color: var(--text-hi);
+}
+
+/* Focus visibility inside the bar: buttons and sliders get the brand
+   ring (global :focus-visible also applies, keep it consistent). */
+.lightbox__controls :focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.lightbox__controls-note {
+  margin-left: auto;
+  color: var(--text-low);
 }

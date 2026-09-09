@@ -1,0 +1,1 @@
+export { ManualAlignScreen } from './ManualAlignScreen';

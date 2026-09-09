@@ -447,3 +447,72 @@ export interface RenameStatus {
   failed_items: RenameFailedItem[];
   undo_log_path: string | null;
 }
+
+// ── Alignment (Phase 4) ────────────────────────────────────────────────
+
+/** Lifecycle of a batch alignment run on the engine. */
+export type AlignRunState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** Quality verdict of one aligned pair. */
+export type AlignVerdict = 'excellent' | 'good' | 'poor' | 'failed';
+
+/** One endpoint of an alignment result row: which sheet of which issue. */
+export interface AlignSheetRef {
+  filename: string;
+  /** Engine tile-sheet id; null when the pair has no readable sheet. */
+  sheet_id: string | null;
+}
+
+/** One quality-gate metric: value, its threshold and whether it passed. */
+export interface AlignMetric {
+  value: number;
+  threshold: number;
+  passed: boolean;
+}
+
+/** One aligned (or failed) pair, as the review screen shows it. */
+export interface AlignResultRow {
+  old: AlignSheetRef;
+  new: AlignSheetRef;
+  verdict: AlignVerdict;
+  /** Which automatic strategy produced the fit, e.g. "text_anchors". */
+  method: string;
+  /** The engine's own note — failure reasons are shown verbatim. */
+  note: string;
+  duration_s: number;
+  /** Row-major 3×3 matrix, old-sheet px → new-sheet px at 200 dpi; null when nothing fitted. */
+  matrix: number[][] | null;
+  /** Plain-English explanation of the verdict, for the user. */
+  explanation: string;
+  rms_mm_on_paper: number | null;
+  rms_mm_on_site: number | null;
+  /** metric name → value/threshold/passed, e.g. "rms_residual_px". */
+  metrics: Record<string, AlignMetric> | null;
+}
+
+/** Response of GET /api/align/results (available once the run is done). */
+export interface AlignResultsPayload {
+  results: AlignResultRow[];
+  summary: Record<string, number>;
+}
+
+/** Response of GET /api/align/status — polled, not a socket. */
+export interface AlignStatus {
+  state: AlignRunState;
+  run_id: string | null;
+  current: number;
+  total: number;
+  current_label: string | null;
+  message: string | null;
+  error: string | null;
+  /** verdict → count once a run has settled. */
+  summary: Record<string, number>;
+}
+
+/** One user-clicked correspondence for manual alignment, in sheet pixels at 200 dpi. */
+export interface ManualPoint {
+  old_x: number;
+  old_y: number;
+  new_x: number;
+  new_y: number;
+}
