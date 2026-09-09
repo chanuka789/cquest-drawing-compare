@@ -124,6 +124,20 @@ class ComparisonSession:
         }
         self.rename_plan: object | None = None
         self._rename_cancel = CancelToken()
+        #: Phase 4 alignment state. See :meth:`run_alignments`.
+        self.align_run: dict[str, object] = {
+            "state": "idle",
+            "run_id": None,
+            "current": 0,
+            "total": 0,
+            "current_label": None,
+            "message": None,
+            "error": None,
+            "summary": {},
+            "output_path": None,
+        }
+        self.align_results: list[object] = []
+        self._align_cancel = CancelToken()
 
     # -- sides ---------------------------------------------------------
 
@@ -616,6 +630,167 @@ class ComparisonSession:
                 "timestamp": entry.timestamp,
             }
             mirror(data)
+
+    # -- Phase 4: alignment ---------------------------------------------
+
+    def _sheet_by_key(self) -> dict[str, SheetRecord]:
+        index: dict[str, SheetRecord] = {}
+        for state in (self.old, self.new):
+            for sheet in state.sheets:
+                index[f"{sheet.abs_path}#{sheet.page_index}"] = sheet
+        return index
+
+    def pending_align_pairs(self) -> list[tuple[object, object]]:
+        """The accepted match pairs, ready for alignment.
+
+        Manual pairings (review screens) replace the matched new sheet with
+        the one the user chose; rejected pairs are excluded.
+        """
+        from engine.naming.matcher import MatchResult
+
+        if not isinstance(self.match_result, MatchResult):
+            raise ValueError("Match the drawings and review the result first.")
+        index = self._sheet_by_key()
+        pairs: list[tuple[object, object]] = []
+        seen: set[tuple[str, str]] = set()
+
+        for pair in self.match_result.pairs:
+            old_key = f"{pair.old.abs_path}#{pair.old.page_index}"
+            if self.match_decisions.get(old_key) == "rejected":
+                continue
+            new_key = self.manual_pairs.get(old_key) or (
+                f"{pair.new.abs_path}#{pair.new.page_index}"
+            )
+            if (old_key, new_key) in seen:
+                continue
+            seen.add((old_key, new_key))
+            old_sheet = index.get(old_key)
+            new_sheet = index.get(new_key)
+            if old_sheet is None or new_sheet is None:
+                continue
+            pairs.append((old_sheet, new_sheet))
+        return pairs
+
+    def run_alignments(self) -> str:
+        """Align the accepted pairs on a worker thread. Returns a run id."""
+        from engine.align.orchestrator import SheetRef
+
+        if self.align_run["state"] == "running":
+            raise ValueError("An alignment run is already in progress.")
+        pairs = self.pending_align_pairs()
+        if not pairs:
+            raise ValueError("There are no accepted pairs to align.")
+
+        run_id = f"align-{uuid.uuid4().hex[:8]}"
+        self._align_cancel.reset()
+        self.align_run = {
+            "state": "running",
+            "run_id": run_id,
+            "current": 0,
+            "total": len(pairs),
+            "current_label": None,
+            "message": "Starting…",
+            "error": None,
+            "summary": {},
+            "output_path": None,
+        }
+        self.align_results = []
+
+        def ref(sheet: SheetRecord) -> SheetRef:
+            return SheetRef(
+                abs_path=sheet.abs_path,
+                page_index=sheet.page_index,
+                scale_text=sheet.scale,
+                revision=sheet.revision,
+            )
+
+        refs = [(ref(old), ref(new)) for old, new in pairs]
+
+        def work() -> None:
+            from engine.align.orchestrator import align_batch
+
+            try:
+                results = align_batch(
+                    refs,
+                    progress=self._align_progress,
+                    cancel=self._align_cancel,
+                )
+                self.align_results = list(results)
+                from collections import Counter
+
+                counts = Counter(str(getattr(item, "verdict", "failed")) for item in results)
+                self.align_run.update(
+                    {
+                        "state": "cancelled"
+                        if self._align_cancel.cancelled
+                        else "done",
+                        "current": len(results),
+                        "total": len(refs),
+                        "message": f"Aligned {len(results)} pair(s).",
+                        "summary": dict(counts),
+                        "output_path": self._write_alignment_audit(results),
+                    }
+                )
+            except Exception as exc:
+                logger.exception("Alignment failed")
+                self.align_run.update({"state": "failed", "error": str(exc)})
+
+        thread = threading.Thread(target=work, name="cqdc-align", daemon=True)
+        self._threads[run_id] = thread
+        thread.start()
+        return run_id
+
+    def _align_progress(self, completed: int, total: int, current_label: str) -> None:
+        self.align_run.update(
+            {
+                "current": completed,
+                "total": total,
+                "current_label": current_label,
+                "message": f"Aligning… {current_label}",
+            }
+        )
+
+    def align_status(self) -> dict[str, object]:
+        return dict(self.align_run)
+
+    def cancel_alignment(self) -> bool:
+        if self.align_run["state"] == "running":
+            self._align_cancel.cancel()
+            return True
+        return False
+
+    def _write_alignment_audit(self, results: list[object]) -> str | None:
+        """Snapshot the alignment run into the workspace audit folder."""
+        import json
+        from datetime import UTC, datetime
+
+        if self.workspace is None:
+            return None
+        rows: list[dict[str, object]] = []
+        for item in results:
+            matrix = getattr(item, "matrix", None)
+            rows.append(
+                {
+                    "verdict": str(getattr(item, "verdict", "failed")),
+                    "method": str(getattr(item, "method", "")),
+                    "note": getattr(item, "note", ""),
+                    "duration_s": round(float(getattr(item, "duration_s", 0.0)), 3),
+                    "matrix": (
+                        [[float(value) for value in row] for row in matrix]
+                        if matrix is not None
+                        else None
+                    ),
+                }
+            )
+        payload: dict[str, object] = {
+            "written_at": datetime.now(UTC).isoformat(),
+            "count": len(rows),
+            "results": rows,
+        }
+        self.workspace.audit_dir.mkdir(parents=True, exist_ok=True)
+        target = self.workspace.audit_dir / "alignment.json"
+        target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        return str(target)
 
     def quarantine_entries(self) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []
