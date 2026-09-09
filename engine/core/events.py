@@ -46,6 +46,10 @@ class Stage(StrEnum):
     INSPECT = "inspect"  # deep pass
     EXTRACT = "extract"  # title block
     RECONCILE = "reconcile"
+    MATCH = "match"  # Phase 3: pairing sheets
+    FINGERPRINT = "fingerprint"  # Phase 3: computing sheet fingerprints
+    RENAME = "rename"  # Phase 3: applying renames
+    UNDO = "undo"  # Phase 3: reversing renames
     EXPORT = "export"
 
 

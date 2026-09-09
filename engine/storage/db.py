@@ -7,20 +7,36 @@ journalling so a reader is never blocked by the writer during a long run.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import Engine, create_engine, event, select
+from sqlalchemy import Engine, create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from engine.storage.schema import SCHEMA_VERSION, Base, Meta
+from engine.storage.schema import SCHEMA_VERSION, Base, Meta, RenameLog
 from engine.utils.errors import NotFoundError, SchemaVersionError
 
 #: Key used in the `meta` table.
 SCHEMA_VERSION_KEY = "schema_version"
+
+
+def _migrate_1_to_2(engine: Engine) -> None:
+    """1 -> 2: RenameLog was scaffolding (no rows were ever written) but its
+    columns could not record source paths or hashes. Rebuild it with the full
+    audit shape."""
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS rename_log"))
+    RenameLog.__table__.create(engine, checkfirst=True)
+    logger.info("Migrated project database to schema 2 (rename_log rebuilt)")
+
+
+#: Version-to-version migration steps. Each entry upgrades a file at that
+#: version to the next one. Fresh files are created at SCHEMA_VERSION, so only
+#: files written by an older build ever run a migration.
+MIGRATIONS: dict[int, Callable[[Engine], None]] = {1: _migrate_1_to_2}
 
 
 @event.listens_for(Engine, "connect")
@@ -66,8 +82,37 @@ def create_project_db(path: str | Path, *, overwrite: bool = False) -> Engine:
     return engine
 
 
+def _run_migrations(engine: Engine, start_version: int) -> None:
+    """Upgrade an older file step by step, then record the new version.
+
+    Migrations are strictly forward and small; each entry upgrades exactly one
+    version. A file newer than this build is refused before this runs.
+    """
+    version = start_version
+    with Session(engine) as session:
+        while version < SCHEMA_VERSION:
+            handler = MIGRATIONS.get(version)
+            if handler is None:
+                raise SchemaVersionError(
+                    f"The database uses schema {version} and no migration path to "
+                    f"{SCHEMA_VERSION} exists."
+                )
+            handler(engine)
+            version += 1
+            row = session.scalar(select(Meta).where(Meta.key == SCHEMA_VERSION_KEY))
+            if row is None:
+                session.add(Meta(key=SCHEMA_VERSION_KEY, value=str(version)))
+            else:
+                row.value = str(version)
+            session.commit()
+
+
 def open_project_db(path: str | Path) -> Engine:
-    """Open an existing project database and check its schema version."""
+    """Open an existing project database, migrating it if it is older.
+
+    A file written by a newer version of the application is refused — never
+    downgrade a file a newer build may have touched.
+    """
     target = Path(path)
     if not target.exists():
         raise NotFoundError(f"No project database at {target}")
@@ -84,10 +129,9 @@ def open_project_db(path: str | Path) -> Engine:
             "Update the application to open it."
         )
     if version < SCHEMA_VERSION:
-        # No migrations exist yet. When they do, run them here.
-        raise SchemaVersionError(
-            f"{target.name} uses schema {version} and needs migrating to {SCHEMA_VERSION}."
-        )
+        # No migrations existed before; the first one arrives with schema 2.
+        _run_migrations(engine, version)
+        version = read_schema_version(engine)
 
     logger.info("Opened project database | path={} | schema_version={}", target, version)
     return engine

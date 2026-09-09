@@ -148,3 +148,40 @@ def test_open_existing_database_succeeds(tmp_path):
     engine = open_project_db(db_path)
     assert read_schema_version(engine) == SCHEMA_VERSION
     engine.dispose()
+
+
+def test_an_older_schema_is_migrated_on_open(monkeypatch, tmp_path):
+    """A schema-1 file (from a build before Phase 3) opens cleanly after the
+    rename_log table is rebuilt at schema 2."""
+    import engine.storage.db as db_module
+
+    db_path = tmp_path / "legacy.cqdc"
+
+    # Write a file as the old build would have: schema version 1.
+    monkeypatch.setattr(db_module, "SCHEMA_VERSION", 1)
+    old_engine = db_module.create_project_db(db_path)
+    with db_module.session_scope(old_engine) as session:
+        session.execute(db_module.text("DROP TABLE IF EXISTS rename_log"))
+        session.execute(
+            db_module.text(
+                "CREATE TABLE rename_log ("
+                " id INTEGER PRIMARY KEY,"
+                " project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,"
+                " old_name TEXT NOT NULL,"
+                " new_name TEXT NOT NULL,"
+                " applied_at DATETIME,"
+                " reversed_at DATETIME)"
+            )
+        )
+    old_engine.dispose()
+    monkeypatch.undo()  # restore SCHEMA_VERSION=2 before opening/migrating
+
+    engine = open_project_db(db_path)
+    assert read_schema_version(engine) == 2
+    with session_scope(engine) as session:
+        columns = {
+            row[1] for row in session.execute(db_module.text("PRAGMA table_info(rename_log)"))
+        }
+    assert "source_path" in columns
+    assert "source_hash" in columns
+    engine.dispose()

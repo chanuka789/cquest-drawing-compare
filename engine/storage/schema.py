@@ -23,7 +23,7 @@ from sqlalchemy.types import TypeDecorator
 
 #: Bumped whenever the schema changes. Stored in the `meta` table of every
 #: project file so a future version can migrate an older project.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def utc_now() -> datetime:
@@ -233,14 +233,27 @@ class BoqLink(Base):
 
 
 class RenameLog(Base):
-    """Reversible record of every rename. Originals are never touched."""
+    """Reversible record of every rename. Originals are never touched.
+
+    One row per operation, written *before* the operation runs. The source
+    hash is what makes an undo safe: if the file changed after the rename,
+    the undo refuses to overwrite newer work.
+    """
 
     __tablename__ = "rename_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
-    old_name: Mapped[str] = mapped_column(Text)
-    new_name: Mapped[str] = mapped_column(Text)
+    #: Order of operations; undo runs in reverse sequence.
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    #: 'copy' writes a renamed copy into the output workspace; 'in_place'
+    #: renames the file where it is. Copy is the default and the safe one.
+    operation: Mapped[str] = mapped_column(String(16), default="copy")
+    source_path: Mapped[str] = mapped_column(Text)
+    target_path: Mapped[str] = mapped_column(Text)
+    #: Hash of the source file before the operation, for verified undo.
+    source_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    success: Mapped[bool] = mapped_column(default=False)
     applied_at: Mapped[datetime] = mapped_column(default=utc_now)
     reversed_at: Mapped[datetime | None] = mapped_column(default=None)
 
