@@ -74,22 +74,29 @@ Ruff `target-version` stays at `py313` so the code remains 3.13-compatible.
 
 ## Current phase
 
-Phase 2 — Intake & register. Scanning folders, identifying drawings,
-reconciling the two sets, exporting the register.
-No image rendering, no alignment, no comparison. Those are Phase 4+.
+Phase 3 — Matching and rename. Pairing drawings across issues
+(engine/naming), and safe bulk renaming to a naming standard
+(normaliser, template, planner, executor). No rendering, no image
+comparison yet.
 
-## Phase 2 rules
+Phase 2 (intake & register) is built and its rules still apply to that
+code: scan progressively, cache by (path, size, mtime), every drawing
+number records HOW it was found, a missing drawing in a partial issue
+is not a deletion, and the app never writes into the input folders.
 
-- Scanning must show results progressively. Never block the UI while
-  reading a network folder.
-- Every scan result is cached by (path, size, mtime). Re-scanning an
-  unchanged folder must be near-instant.
-- Every drawing number records HOW it was found (title block, filename,
-  drawing list, or user). The user must be able to see and trust this.
-- A missing drawing in a partial issue is NOT a deleted drawing.
-  Never use the word "removed" until the issue type is known.
-- The app never writes into the user's input folders. All output goes
-  to the output folder the user chose.
+## Phase 3 rules
+
+- NEVER modify, move, or delete a file in the user's input folders.
+  Renames write copies into the output workspace by default.
+- In-place rename requires a separate, explicit opt-in with a warning,
+  and must still write a full undo log.
+- Every rename operation is logged with old name, new name, file hash,
+  and timestamp, so it can be reversed and verified.
+- Always dry-run first. The user sees the full plan before anything
+  touches the disk.
+- Matching is a global assignment problem, not a per-file greedy search.
+- Never auto-apply a match or rename below the confidence threshold.
+  Low confidence goes to the user for a decision.
 
 ## Known real-world facts (learned the hard way, keep in mind)
 
