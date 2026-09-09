@@ -33,12 +33,18 @@ profiles = PROJECT_ROOT / "profiles"
 if any(profiles.glob("*.json")):
     datas.append((str(profiles), "profiles"))
 
+# Phase 3: shipped naming template presets, next to the sheet profiles.
+naming_templates = PROJECT_ROOT / "naming_templates"
+if any(naming_templates.glob("*.json")):
+    datas.append((str(naming_templates), "naming_templates"))
+
 # Uvicorn and pywebview load these by name at runtime, so static analysis
 # cannot see them.
 hiddenimports = [
     *collect_submodules("uvicorn"),
     *collect_submodules("webview.platforms"),
     "engine.api.routes_system",
+    "engine.api.routes_naming",
 ]
 
 a = Analysis(
