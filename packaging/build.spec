@@ -45,6 +45,7 @@ hiddenimports = [
     *collect_submodules("webview.platforms"),
     "engine.api.routes_system",
     "engine.api.routes_naming",
+    "engine.api.routes_changes",
 ]
 
 a = Analysis(
