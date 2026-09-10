@@ -27,6 +27,9 @@ const DROP_NOT_SUPPORTED =
 export function SetupScreen() {
   const state = useSetupStore();
   const goToRegister = useAppStore((store) => store.goToRegister);
+  const goToRename = useAppStore((store) => store.goToRename);
+  const goToChanges = useAppStore((store) => store.goToChanges);
+  const tool = useAppStore((store) => store.tool);
   const ready = canBuildRegister(state);
 
   // The scan streams progress; refresh the panels whenever a stage ends.
@@ -220,15 +223,40 @@ export function SetupScreen() {
           </p>
         </div>
 
+        {/* Where "next" leads depends on the job the user picked on the home
+            screen. Comparing and renaming are separate tools, so neither is
+            routed through the other's screens; the register stays available
+            for anyone who wants to look at it first. */}
         <div className="setup__actions">
+          {tool === 'rename' ? (
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!ready}
+              title={ready ? undefined : 'Choose a folder for both issues and let the scan finish'}
+              onClick={() => goToRename()}
+            >
+              Build the names →
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!ready}
+              title={ready ? undefined : 'Choose a folder for both issues and let the scan finish'}
+              onClick={() => goToChanges()}
+            >
+              Find the changes →
+            </button>
+          )}
           <button
             type="button"
-            className="button button--primary"
+            className="button"
             disabled={!ready}
             title={ready ? undefined : 'Choose a folder for both issues and let the scan finish'}
             onClick={() => goToRegister()}
           >
-            Build the register →
+            Build the register
           </button>
         </div>
       </div>

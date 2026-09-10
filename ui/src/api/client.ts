@@ -15,6 +15,10 @@ import type {
   AlignResultsPayload,
   AlignResultRow,
   AlignStatus,
+  CompareResultRow,
+  CompareResultsPayload,
+  CompareStartResponse,
+  CompareStatus,
   ErrorResponse,
   HealthResponse,
   IssueSide,
@@ -24,6 +28,7 @@ import type {
   MatchDecisionsResponse,
   MatchResult,
   MatchStatus,
+  OutputState,
   OutputValidation,
   QuarantinedFile,
   ReconcileResult,
@@ -221,6 +226,16 @@ export function fetchQuarantine(): Promise<QuarantinedFile[]> {
 }
 
 // ── Output folder ──────────────────────────────────────────────────────
+
+/**
+ * The output folder the engine is actually using.
+ *
+ * Without this the UI could not restore the folder after a reload, so it
+ * offered "Choose a folder" while the engine already held a workspace.
+ */
+export function fetchOutput(): Promise<OutputState> {
+  return get<OutputState>('/api/output');
+}
 
 export function fetchOutputSuggestion(): Promise<{ folder: string | null }> {
   return get<{ folder: string | null }>('/api/output/suggestion');
@@ -468,4 +483,56 @@ export async function fetchTileBlob(
 
   if (!response.ok) throw await toApiError(response);
   return response.blob();
+}
+
+// ── Changes (Phase 5) ──────────────────────────────────────────────────
+
+/**
+ * The standalone compare tool: go from two chosen folders to a change list.
+ *
+ * The engine arranges whatever comparing needs — a workspace, a set of
+ * pairs, a transform each — instead of making the user walk a wizard. It
+ * answers `aligning` when alignment had to start first; call it again once
+ * that run is done and it answers `comparing`.
+ */
+export function startCompare(): Promise<CompareStartResponse> {
+  return post<CompareStartResponse>('/api/compare/start', {});
+}
+
+/** Compare the already-aligned pairs in the background. */
+export function runCompare(): Promise<{ run_id: string }> {
+  return post<{ run_id: string }>('/api/compare/run', {});
+}
+
+/** Where the comparison run has got to — polled, not a socket. */
+export function fetchCompareStatus(): Promise<CompareStatus> {
+  return get<CompareStatus>('/api/compare/status');
+}
+
+/** The change list. 422 until the run has settled. */
+export function fetchCompareResults(): Promise<CompareResultsPayload> {
+  return get<CompareResultsPayload>('/api/compare/results');
+}
+
+/** Ask the engine to stop the comparison cleanly. */
+export function cancelCompare(): Promise<{ cancelled: boolean }> {
+  return post<{ cancelled: boolean }>('/api/compare/cancel');
+}
+
+/**
+ * Compare one chosen pair on its own, without running the batch.
+ * Synchronous on the engine: it is one action on one pair.
+ */
+export function compareOnePair(body: {
+  oldSheetId: string;
+  newSheetId: string;
+  alignIndex?: number | null;
+  maskTitleBlock?: boolean;
+}): Promise<CompareResultRow> {
+  return post<CompareResultRow>('/api/compare/pair', {
+    old_sheet_id: body.oldSheetId,
+    new_sheet_id: body.newSheetId,
+    align_index: body.alignIndex ?? null,
+    mask_title_block: body.maskTitleBlock ?? true,
+  });
 }

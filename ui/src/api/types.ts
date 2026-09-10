@@ -516,3 +516,92 @@ export interface ManualPoint {
   new_x: number;
   new_y: number;
 }
+
+// ── Changes (Phase 5) ──────────────────────────────────────────────────
+
+/** Lifecycle of a batch comparison run on the engine. */
+export type CompareRunState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** What kind of change one region is. */
+export type ChangeType = 'added' | 'removed' | 'moved' | 'modified' | 'cosmetic';
+
+/** How much the change matters. Ranked by consequence, never by area alone. */
+export type ChangeSeverity = 'critical' | 'major' | 'minor' | 'trivial';
+
+/** What the words in a region are, when the text layer could be read. */
+export type TextChangeKind = 'dimension' | 'tag' | 'note';
+
+/** One rectangle of the new sheet that differs from the old one. */
+export interface ChangeRegion {
+  index: number;
+  type: ChangeType;
+  severity: ChangeSeverity;
+  /** x, y, width, height on the new sheet's pixel grid — for drawing only. */
+  bbox_px: [number, number, number, number];
+  /** The same box on paper, in millimetres. */
+  bbox_mm: [number, number, number, number];
+  area_mm2: number;
+  /** Area at drawing scale; null when the scale could not be read. */
+  area_site_mm2: number | null;
+  added_px: number;
+  removed_px: number;
+  is_cosmetic: boolean;
+  moved_from_px: [number, number, number, number] | null;
+  moved_by_mm: number | null;
+  moved_by_site_mm: number | null;
+  text_kind: TextChangeKind | null;
+  old_text: string | null;
+  new_text: string | null;
+  /** One sentence for the user. Never mentions pixels. */
+  explanation: string;
+}
+
+/** One compared pair and everything found on it. */
+export interface CompareResultRow {
+  old: AlignSheetRef;
+  new: AlignSheetRef;
+  width_px: number;
+  height_px: number;
+  dpi: number;
+  scale_denominator: number | null;
+  /** change type → count. */
+  counts: Record<string, number>;
+  region_count: number;
+  /** Regions that are not merely cosmetic. */
+  substantive_count: number;
+  truncated: boolean;
+  duration_s: number;
+  /** Set when the pair could not be compared at all. */
+  failure: string | null;
+  regions: ChangeRegion[];
+}
+
+/** Response of GET /api/compare/results. */
+export interface CompareResultsPayload {
+  results: CompareResultRow[];
+  summary: Record<string, number>;
+}
+
+/** Response of GET /api/compare/status — polled, not a socket. */
+export interface CompareStatus {
+  state: CompareRunState;
+  run_id: string | null;
+  current: number;
+  total: number;
+  current_label: string | null;
+  message: string | null;
+  error: string | null;
+  summary: Record<string, number>;
+}
+
+/** What POST /api/compare/start kicked off — it may need to align first. */
+export interface CompareStartResponse {
+  stage: 'aligning' | 'comparing';
+  run_id: string | null;
+}
+
+/** Response of GET /api/output — lets the UI restore the chosen folder. */
+export interface OutputState {
+  folder: string | null;
+  workspace: Record<string, string> | null;
+}

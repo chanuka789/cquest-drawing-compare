@@ -63,7 +63,7 @@ import {
   Texture,
   isWebGLSupported,
 } from 'pixi.js';
-import type { TileManifest } from '../../api/types';
+import type { ChangeRegion, TileManifest } from '../../api/types';
 import {
   COLOUR_BLIND_DIFF_PALETTE,
   DEFAULT_DIFF_PALETTE,
@@ -158,6 +158,17 @@ export interface LightboxProps {
    * Defaults to true. Keyboard access works either way.
    */
   controls?: boolean;
+  /**
+   * Phase 5 change regions to outline on the new sheet, in that sheet's
+   * pixel grid. Drawn as an HTML overlay above the canvas rather than
+   * inside it, so the diff renderers stay untouched and the boxes stay
+   * crisp at every zoom.
+   */
+  changeRegions?: ChangeRegion[];
+  /** Which region is highlighted. */
+  selectedRegion?: number | null;
+  /** Fired when the user clicks a region box. */
+  onSelectRegion?: (index: number) => void;
 }
 
 /** Order matches the digit keys 1–4. */
@@ -180,6 +191,9 @@ const KEY_DIVIDER_NUDGE_PX = 24;
 const KEY_ZOOM_FACTOR = 1.25;
 /** Minimap redraw throttle in frames (60 fps → ~15 fps). */
 const MINIMAP_EVERY_FRAMES = 4;
+/** A CSS reference pixel is 1/96 in, so this many per millimetre of screen. */
+const CSS_PX_PER_MM = 96 / 25.4;
+
 /** Placeholder (tile still loading) alpha over the sheet. */
 const PLACEHOLDER_ALPHA = 0.55;
 
@@ -1143,6 +1157,8 @@ interface LightboxCoreOptions {
   scaleElement: HTMLDivElement;
   colors: TokenColors;
   onMode: (mode: LightboxRendererMode) => void;
+  /** Reports pan and zoom so overlays above the canvas can follow it. */
+  onView?: (view: ViewState) => void;
 }
 
 class LightboxCore implements FrameHost {
@@ -1153,6 +1169,9 @@ class LightboxCore implements FrameHost {
   private readonly minimapCanvas: HTMLCanvasElement;
   private readonly scaleElement: HTMLDivElement;
   private readonly onMode: (mode: LightboxRendererMode) => void;
+  private readonly onView?: (view: ViewState) => void;
+  /** Last reported view, so the callback only fires when it really moved. */
+  private lastReportedView = '';
 
   private backend: Backend | null = null;
   private disposed = false;
@@ -1174,6 +1193,12 @@ class LightboxCore implements FrameHost {
 
   private resizeObserver: ResizeObserver | null = null;
   private lastFitKey = '';
+  /**
+   * True once the user has panned or zoomed. Until then the view belongs to
+   * the app, and a resize re-fits; afterwards the view is theirs and a
+   * resize must never move it.
+   */
+  private userAdjusted = false;
   private frame = 0;
   private minimapDirty = false;
   private lastMinimapAt = 0;
@@ -1186,6 +1211,7 @@ class LightboxCore implements FrameHost {
     this.minimapCanvas = options.minimapCanvas;
     this.scaleElement = options.scaleElement;
     this.onMode = options.onMode;
+    this.onView = options.onView;
     // Tiles arrive asynchronously, long after the reconcile that requested
     // them; each arrival must push the new bitmaps into the scene or the
     // placeholder would sit there until the next user interaction.
@@ -1272,8 +1298,10 @@ class LightboxCore implements FrameHost {
       if (!keep.has(id)) this.loader.releaseSheet(id);
     }
 
-    // Force a fresh fit once the new content's sizes are known.
+    // Force a fresh fit once the new content's sizes are known, and take
+    // the view back: it describes the sheet that just went away.
     this.lastFitKey = '';
+    this.userAdjusted = false;
     this.contentChanged();
   }
 
@@ -1343,7 +1371,13 @@ class LightboxCore implements FrameHost {
     // change since the last observation.
     this.backend?.resize(width, height, this.devicePixelRatio);
     if (!changed) return;
-    this.maybeFit();
+    // The fit key describes the CONTENT, so a pure resize does not change
+    // it and maybeFit would do nothing — which is how an embedded viewer
+    // that mounted into a collapsed panel kept a fit computed for the wrong
+    // size, and showed the sheet at 1 % forever. Re-fit outright, unless
+    // the user has taken the view over.
+    if (this.userAdjusted) this.maybeFit();
+    else this.fit();
     this.applyView();
   }
 
@@ -1352,6 +1386,7 @@ class LightboxCore implements FrameHost {
   /** Pan by a screen delta: content follows the pointer. */
   panByScreen(dxScreen: number, dyScreen: number): void {
     if (!(this.view.scale > 0)) return;
+    this.userAdjusted = true;
     this.view.x -= dxScreen / this.view.scale;
     this.view.y -= dyScreen / this.view.scale;
     this.applyView();
@@ -1363,6 +1398,7 @@ class LightboxCore implements FrameHost {
     const oldScale = this.view.scale;
     const newScale = clampScale(oldScale * factor);
     if (newScale === oldScale) return;
+    this.userAdjusted = true;
     const worldX = this.view.x + sx / oldScale;
     const worldY = this.view.y + sy / oldScale;
     this.view.scale = newScale;
@@ -1379,6 +1415,7 @@ class LightboxCore implements FrameHost {
   fit(): void {
     const bounds = this.contentBounds();
     if (!bounds) return;
+    this.userAdjusted = false;
     const padX = Math.max(24, this.width * 0.03);
     const padY = Math.max(24, this.height * 0.03);
     const availableWidth = Math.max(1, this.width - padX * 2);
@@ -1553,14 +1590,27 @@ class LightboxCore implements FrameHost {
   private refreshScaleIndicator(): void {
     const percent = Math.round(this.view.scale * 100);
     let text = `${percent}%`;
+    // What 100 mm of paper measures on screen, in millimetres of screen —
+    // never in pixels. Pixels are an implementation detail and this app
+    // does not put them in front of a user.
     const pxPerMm = this.pxPerMm ?? (this.dpi > 0 ? this.dpi / 25.4 : 0);
     if (pxPerMm > 0 && Number.isFinite(pxPerMm)) {
-      const px100 = Math.round(100 * this.view.scale * pxPerMm);
-      text += ` · 100 mm ≈ ${px100} px`;
+      const screenMm = (100 * this.view.scale * pxPerMm) / CSS_PX_PER_MM;
+      text += ` · 100 mm of paper ≈ ${screenMm.toFixed(0)} mm on screen`;
     }
     if (this.scaleElement.textContent !== text) {
       this.scaleElement.textContent = text;
     }
+    this.reportView();
+  }
+
+  /** Tell React where the view is, so overlays can be drawn over the canvas. */
+  private reportView(): void {
+    if (!this.onView) return;
+    const signature = `${this.view.x.toFixed(2)},${this.view.y.toFixed(2)},${this.view.scale.toFixed(5)}`;
+    if (signature === this.lastReportedView) return;
+    this.lastReportedView = signature;
+    this.onView({ x: this.view.x, y: this.view.y, scale: this.view.scale });
   }
 
   // ── Minimap ──────────────────────────────────────────────────────────
@@ -1703,6 +1753,9 @@ export function Lightbox(props: LightboxProps) {
     dpi = 200,
     pxPerMm = null,
     controls = true,
+    changeRegions,
+    selectedRegion = null,
+    onSelectRegion,
   } = props;
 
   const loader = useTileLoader();
@@ -1715,6 +1768,8 @@ export function Lightbox(props: LightboxProps) {
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const dividerDragRef = useRef<{ pointerId: number } | null>(null);
   const [rendererMode, setRendererMode] = useState<LightboxRendererMode | null>(null);
+  /** Pan and zoom, mirrored into React so the change overlay can follow. */
+  const [view, setView] = useState<ViewState>({ x: 0, y: 0, scale: 1 });
 
   // ── Mode + control state ─────────────────────────────────────────────
   // The remembered mode is the one persisted preference of the app; the
@@ -1807,6 +1862,7 @@ export function Lightbox(props: LightboxProps) {
       scaleElement,
       colors: readTokenColors(),
       onMode: (renderer) => setRendererMode(renderer),
+      onView: (next) => setView(next),
     });
     coreRef.current = core;
     void core.start();
@@ -2096,6 +2152,14 @@ export function Lightbox(props: LightboxProps) {
     >
       <div ref={canvasAreaRef} className="lightbox__canvas-area">
         <div ref={stageRef} className="lightbox__stage" />
+        <ChangeOverlay
+          regions={changeRegions}
+          selected={selectedRegion}
+          onSelect={onSelectRegion}
+          view={view}
+          width={stageSize.width}
+          height={stageSize.height}
+        />
         <canvas ref={minimapRef} className="lightbox__minimap" aria-hidden="true" />
         <div ref={scaleRef} className="lightbox__scale tabular" aria-hidden="true" />
         {showDivider && (
@@ -2239,5 +2303,110 @@ export function Lightbox(props: LightboxProps) {
         </div>
       )}
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// The change overlay
+// ═══════════════════════════════════════════════════════════════════════
+
+interface ChangeOverlayProps {
+  regions: ChangeRegion[] | undefined;
+  selected: number | null;
+  onSelect: ((index: number) => void) | undefined;
+  view: ViewState;
+  width: number;
+  height: number;
+}
+
+/**
+ * Outlines the Phase 5 change regions above the canvas.
+ *
+ * An SVG layer rather than canvas drawing: the boxes stay one crisp
+ * hairline at any zoom, they can be clicked and tabbed to, and none of
+ * this touches the two diff renderers below.
+ *
+ * The colours come from the diff palette, never from brand red — inside
+ * the canvas red already means "new ink", and a red box drawn for another
+ * reason would be read as part of the drawing.
+ */
+function ChangeOverlay({
+  regions,
+  selected,
+  onSelect,
+  view,
+  width,
+  height,
+}: ChangeOverlayProps) {
+  if (!regions || regions.length === 0 || width <= 0 || height <= 0) return null;
+
+  // World (sheet pixel) → screen, matching the renderers' own transform.
+  const toScreen = (value: number, offset: number): number => (value - offset) * view.scale;
+
+  return (
+    <svg
+      className="lightbox__changes"
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      aria-label="Change regions"
+    >
+      {regions.map((region) => {
+        const [x, y, w, h] = region.bbox_px;
+        const screenX = toScreen(x, view.x);
+        const screenY = toScreen(y, view.y);
+        const screenW = Math.max(3, w * view.scale);
+        const screenH = Math.max(3, h * view.scale);
+
+        // Skip anything entirely off screen: a sheet can carry hundreds.
+        if (
+          screenX + screenW < -20 ||
+          screenY + screenH < -20 ||
+          screenX > width + 20 ||
+          screenY > height + 20
+        ) {
+          return null;
+        }
+
+        const isSelected = region.index === selected;
+        // A generous halo makes a two-pixel dimension edit clickable.
+        const padding = isSelected ? 6 : 4;
+
+        return (
+          <g
+            key={region.index}
+            className={[
+              'lightbox__change',
+              isSelected ? 'lightbox__change--selected' : '',
+              region.is_cosmetic ? 'lightbox__change--cosmetic' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onClick={onSelect ? () => onSelect(region.index) : undefined}
+            role={onSelect ? 'button' : undefined}
+            tabIndex={onSelect ? 0 : undefined}
+            onKeyDown={
+              onSelect
+                ? (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelect(region.index);
+                    }
+                  }
+                : undefined
+            }
+          >
+            <title>{region.explanation}</title>
+            <rect
+              x={screenX - padding}
+              y={screenY - padding}
+              width={screenW + padding * 2}
+              height={screenH + padding * 2}
+              rx={2}
+            />
+          </g>
+        );
+      })}
+    </svg>
   );
 }

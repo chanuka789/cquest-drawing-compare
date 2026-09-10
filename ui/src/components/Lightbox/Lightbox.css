@@ -249,3 +249,53 @@
   margin-left: auto;
   color: var(--text-low);
 }
+
+/* ── Change regions (Phase 5) ─────────────────────────────────────────
+   Drawn above the canvas. The palette is the diff palette — brand red is
+   never allowed inside the canvas, where red already means "new ink". */
+
+.lightbox__changes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-chrome);
+}
+
+.lightbox__change {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.lightbox__change rect {
+  fill: none;
+  stroke: var(--diff-new);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  transition: stroke-width var(--duration-fast) var(--ease-out);
+}
+
+.lightbox__change:hover rect {
+  stroke-width: 2.5;
+}
+
+.lightbox__change--cosmetic rect {
+  stroke: var(--text-low);
+  stroke-dasharray: 4 3;
+}
+
+/* The selected change: a solid ring plus a soft halo, so it is findable
+   on a dense sheet without hiding the ink underneath it. */
+.lightbox__change--selected rect {
+  stroke: var(--diff-new);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px var(--diff-new));
+}
+
+.lightbox__change:focus-visible rect {
+  stroke: var(--diff-old);
+  stroke-width: 3;
+}
+
+.lightbox__change:focus {
+  outline: none;
+}

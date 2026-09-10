@@ -2,11 +2,14 @@ import { useEffect } from 'react';
 
 import { TopBar } from './components/TopBar';
 import { AlignmentScreen } from './screens/Alignment';
+import { ChangesScreen } from './screens/Changes';
+import { HomeScreen } from './screens/Home';
 import { ManualAlignScreen } from './screens/Manual';
 import { MatchingScreen } from './screens/Matching';
 import { RegisterScreen } from './screens/Register';
 import { RenameScreen } from './screens/Rename';
 import { SetupScreen } from './screens/Setup';
+import { ViewerScreen } from './screens/Viewer';
 import { useAppStore } from './store/appStore';
 
 import './App.css';
@@ -22,12 +25,15 @@ export default function App() {
   return (
     <div className="shell">
       <TopBar />
+      {screen === 'home' && <HomeScreen />}
       {screen === 'setup' && <SetupScreen />}
       {screen === 'register' && <RegisterScreen />}
       {screen === 'matching' && <MatchingScreen />}
       {screen === 'rename' && <RenameScreen />}
       {screen === 'alignment' && <AlignmentScreen />}
       {screen === 'manual' && <ManualAlignScreen />}
+      {screen === 'changes' && <ChangesScreen />}
+      {screen === 'viewer' && <ViewerScreen />}
     </div>
   );
 }

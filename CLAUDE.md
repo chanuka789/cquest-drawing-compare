@@ -74,9 +74,16 @@ Ruff `target-version` stays at `py313` so the code remains 3.13-compatible.
 
 ## Current phase
 
-Phase 4 — Render and align. Rasterising sheets into tiles, computing
-the transform that maps the old sheet onto the new one, and the
-lightbox viewer. No change detection yet — that is Phase 5.
+Phase 5 — Compare. The core of change detection is built: raster diff
+of the aligned pair, clustering into change regions, change typing
+(added / removed / moved / modified), severity, and the change list in
+the UI. Still to come from the Phase 5 plan: revision-cloud detection
+and cross-check, hatch diff, the overlay PDF and the change register
+workbook.
+
+Phase 4 (render and align) is built: tiles, the transform cascade, and
+the lightbox viewer — which now has a full-size home of its own
+(`screens/Viewer`), not only the preview panel on the alignment screen.
 
 Phase 3 (matching & rename) is built and its rules still apply to that
 code: renames never touch the input folders and always write a full,
@@ -86,6 +93,23 @@ register) likewise: scan progressively, cache by (path, size, mtime),
 every drawing number records HOW it was found, a missing drawing in a
 partial issue is not a deletion, and the app never writes into the
 input folders.
+
+## Phase 5 rules
+
+- **Comparing and renaming are separate tools**, not steps in one flow.
+  Either must work without the other. Matching and alignment are things
+  a tool arranges for itself, never gates the user has to pass; their
+  review screens stay reachable for anyone who wants them.
+- A sheet whose only change is its revision letter reports **zero**
+  changes. That is what the title block mask is for.
+- **Text outranks area.** A dimension that changed is critical however
+  few pixels moved; ranking `3200` → `3400` as trivial because it is
+  small is the failure this app exists to prevent.
+- Cosmetic changes are hidden by default, never dropped.
+- A pair that failed to align is not compared. Diffing two unaligned
+  sheets flags every line on the drawing, which is worse than silence.
+- The engine creates the workspace on demand from the suggested output
+  folder. Refusing to serve tiles without one left the viewer blank.
 
 ## Phase 4 rules
 

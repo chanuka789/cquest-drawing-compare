@@ -4,6 +4,13 @@
  *
  * Screen state lives in its own store. This one holds only what every screen
  * needs to know.
+ *
+ * Navigation is a graph, not a wizard. Comparing drawings and renaming them
+ * are two separate jobs a user comes here to do, and either can be done
+ * without the other; the screens between them (register, matching,
+ * alignment) are stages you may look at, not gates you must pass. So every
+ * screen is reachable from the top bar whenever the work it needs exists,
+ * and each tool arranges its own prerequisites on the engine.
  */
 
 import { create } from 'zustand';
@@ -13,7 +20,20 @@ import type { HealthResponse } from '../api/types';
 import { isDesktop } from '../lib/native';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'ready' | 'error';
-export type ScreenName = 'setup' | 'register' | 'matching' | 'rename' | 'alignment' | 'manual';
+
+export type ScreenName =
+  | 'home'
+  | 'setup'
+  | 'register'
+  | 'matching'
+  | 'rename'
+  | 'alignment'
+  | 'manual'
+  | 'changes'
+  | 'viewer';
+
+/** Which of the two tools the user picked, so screens can offer the right way back. */
+export type ToolName = 'compare' | 'rename' | null;
 
 interface AppState {
   status: ConnectionStatus;
@@ -22,14 +42,27 @@ interface AppState {
   /** True inside the desktop shell, false in a plain browser tab. */
   desktop: boolean;
   screen: ScreenName;
+  /** The job in progress, which decides where "continue" leads. */
+  tool: ToolName;
+  /** The pair the viewer opens on: an index into the align/compare results. */
+  viewerPair: number | null;
 
   connect: () => Promise<void>;
+  /** Go to any screen. Screens guard their own prerequisites. */
+  go: (screen: ScreenName) => void;
+  /** Pick a tool and go to its first screen. */
+  startTool: (tool: Exclude<ToolName, null>) => void;
+  /** Open the full-size viewer on one pair. */
+  openViewer: (pairIndex: number) => void;
+
+  goToHome: () => void;
   goToRegister: () => void;
   goToSetup: () => void;
   goToMatching: () => void;
   goToRename: () => void;
   goToAlignment: () => void;
   goToManual: () => void;
+  goToChanges: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -37,7 +70,9 @@ export const useAppStore = create<AppState>((set) => ({
   health: null,
   errorMessage: null,
   desktop: false,
-  screen: 'setup',
+  screen: 'home',
+  tool: null,
+  viewerPair: null,
 
   connect: async () => {
     set({ status: 'connecting', errorMessage: null });
@@ -53,10 +88,18 @@ export const useAppStore = create<AppState>((set) => ({
     }
   },
 
+  go: (screen) => set({ screen }),
+
+  startTool: (tool) => set({ tool, screen: 'setup' }),
+
+  openViewer: (pairIndex) => set({ screen: 'viewer', viewerPair: pairIndex }),
+
+  goToHome: () => set({ screen: 'home' }),
   goToRegister: () => set({ screen: 'register' }),
   goToSetup: () => set({ screen: 'setup' }),
   goToMatching: () => set({ screen: 'matching' }),
   goToRename: () => set({ screen: 'rename' }),
   goToAlignment: () => set({ screen: 'alignment' }),
   goToManual: () => set({ screen: 'manual' }),
+  goToChanges: () => set({ screen: 'changes' }),
 }));

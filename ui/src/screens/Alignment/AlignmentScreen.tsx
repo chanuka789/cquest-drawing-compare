@@ -122,7 +122,8 @@ function exportReport(rows: AlignResultRow[]): void {
 
 export function AlignmentScreen() {
   const state = useAlignStore();
-  const goToMatching = useAppStore((store) => store.goToMatching);
+  // Alignment exists to serve the comparison, so its way out leads there.
+  const goToChanges = useAppStore((store) => store.goToChanges);
 
   useEffect(() => {
     void state.enter();
@@ -137,8 +138,8 @@ export function AlignmentScreen() {
     <div className="align">
       <header className="align__head">
         <div className="align__title-row">
-          <button type="button" className="align__back" onClick={goToMatching}>
-            ← Matching
+          <button type="button" className="align__back" onClick={goToChanges}>
+            ← Changes
           </button>
           <h1>Alignment</h1>
           <div className="align__head-actions">

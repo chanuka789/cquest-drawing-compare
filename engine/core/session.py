@@ -140,6 +140,20 @@ class ComparisonSession:
         self._align_cancel = CancelToken()
         #: (old, new) sheet references the current run was built from.
         self._align_pair_refs: list[tuple[object, object]] = []
+        #: Phase 5 compare state. See :meth:`run_comparisons`.
+        self.compare_run: dict[str, object] = {
+            "state": "idle",
+            "run_id": None,
+            "current": 0,
+            "total": 0,
+            "current_label": None,
+            "message": None,
+            "error": None,
+            "summary": {},
+            "output_path": None,
+        }
+        self.compare_results: list[object] = []
+        self._compare_cancel = CancelToken()
 
     # -- sides ---------------------------------------------------------
 
@@ -286,9 +300,7 @@ class ComparisonSession:
             reporter = RunReporter(run_id, Stage.MATCH, total=int(self.matching["total"]))
             try:
                 reporter.started()
-                memo = fingerprints_memo(
-                    [*self.old.sheets, *self.new.sheets], self.cache
-                )
+                memo = fingerprints_memo([*self.old.sheets, *self.new.sheets], self.cache)
                 result = matcher_module.match_sets(
                     self.old.sheets,
                     self.new.sheets,
@@ -393,9 +405,7 @@ class ComparisonSession:
 
         self.workspace.audit_dir.mkdir(parents=True, exist_ok=True)
         target = self.workspace.audit_dir / "matching.json"
-        target.write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8"
-        )
+        target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         return str(target)
 
     # -- Phase 3: rename --------------------------------------------------
@@ -430,9 +440,7 @@ class ComparisonSession:
         output_dir = None
         if self.workspace is not None:
             output_dir = (
-                self.workspace.renamed_dir
-                if mode == "copy"
-                else Path(self.new.folder or "").parent
+                self.workspace.renamed_dir if mode == "copy" else Path(self.new.folder or "").parent
             )
         plan = build_plan(
             self.new.sheets,
@@ -463,8 +471,11 @@ class ComparisonSession:
             raise ValueError("A rename or undo is already running.")
         if self.rename_plan is None:
             raise ValueError("Build a rename plan before applying it.")
-        if self.workspace is None:
-            raise ValueError("Choose an output folder before renaming.")
+        # Renaming is a tool in its own right, so it arranges its own output
+        # folder rather than sending the user back to a setup screen. The
+        # suggested folder is derived from the inputs and never inside them,
+        # which keeps the rule that input folders are never written to.
+        self.ensure_workspace()
 
         run_id = f"rename-{uuid.uuid4().hex[:8]}"
         self._rename_cancel.reset()
@@ -514,16 +525,15 @@ class ComparisonSession:
                         "undo_log_path": str(outcome.undo_log_path)
                         if outcome.undo_log_path
                         else None,
-                        "message": f"Renamed {outcome.completed} file(s)." if not outcome.cancelled
+                        "message": f"Renamed {outcome.completed} file(s)."
+                        if not outcome.cancelled
                         else f"Stopped after {outcome.completed} file(s).",
                     }
                 )
                 self._mirror_rename_log(log_path)
             except Exception as exc:
                 logger.exception("Rename failed")
-                self.rename_run.update(
-                    {"state": "failed", "error": str(exc), "message": None}
-                )
+                self.rename_run.update({"state": "failed", "error": str(exc), "message": None})
 
         thread = threading.Thread(target=work, name="cqdc-rename", daemon=True)
         self._threads[run_id] = thread
@@ -592,8 +602,7 @@ class ComparisonSession:
                         "failed": len(outcome.failed),
                         "failed_items": outcome.failed,
                         "undo_log_path": str(log_path),
-                        "message": outcome.reason
-                        or f"Undid {outcome.reversed} rename(s).",
+                        "message": outcome.reason or f"Undid {outcome.reversed} rename(s).",
                     }
                 )
                 self._mirror_rename_log(log_path)
@@ -724,9 +733,7 @@ class ComparisonSession:
                 counts = Counter(str(getattr(item, "verdict", "failed")) for item in results)
                 self.align_run.update(
                     {
-                        "state": "cancelled"
-                        if self._align_cancel.cancelled
-                        else "done",
+                        "state": "cancelled" if self._align_cancel.cancelled else "done",
                         "current": len(results),
                         "total": len(refs),
                         "message": f"Aligned {len(results)} pair(s).",
@@ -795,6 +802,217 @@ class ComparisonSession:
         target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         return str(target)
 
+    # -- Phase 5: comparing -------------------------------------------
+
+    def ensure_workspace(self) -> Workspace:
+        """The workspace, created from the suggested folder if unset.
+
+        Tiles, overlays and audit snapshots all have to live somewhere, and
+        making the user answer that question before they can look at a
+        drawing was the reason the viewer used to come up blank. The
+        suggestion is derived from the input folders, never inside them.
+        """
+        if self.workspace is not None:
+            return self.workspace
+        suggested = suggest_output(self)
+        if suggested is None:
+            raise ValueError(
+                "Choose an output folder before comparing — there is nowhere "
+                "to write the comparison."
+            )
+        return self.set_output_folder(str(suggested))
+
+    def ensure_matched(self, timeout: float = 300.0) -> None:
+        """Make sure a match result exists, running matching if needed.
+
+        Compare and rename are separate tools, and neither should force the
+        user through a matching review first. Matching is how pairs are
+        found, so it runs on demand and quietly; the review screen stays
+        available for anyone who wants to check or correct it.
+        """
+        from engine.naming.matcher import MatchResult
+
+        if isinstance(self.match_result, MatchResult):
+            return
+        if self.matching["state"] == "running":
+            self.wait_for_matching(timeout)
+            return
+        self.run_matching()
+        self.wait_for_matching(timeout)
+        if not isinstance(self.match_result, MatchResult):
+            error = self.matching.get("error") or "Matching did not produce a result."
+            raise ValueError(str(error))
+
+    def _aligned_pairs_for_compare(self) -> list[tuple[object, object, object]]:
+        """(old ref, new ref, matrix) for every pair that aligned well enough.
+
+        A pair whose alignment failed is skipped rather than compared with
+        no transform: diffing two unaligned sheets produces a change on
+        every line, which is worse than saying nothing.
+        """
+        import numpy as np
+
+        rows: list[tuple[object, object, object]] = []
+        for index, item in enumerate(self.align_results):
+            if index >= len(self._align_pair_refs):
+                break
+            verdict = str(getattr(item, "verdict", "failed"))
+            matrix = getattr(item, "matrix", None)
+            if verdict == "failed" or matrix is None:
+                continue
+            old_ref, new_ref = self._align_pair_refs[index]
+            rows.append((old_ref, new_ref, np.asarray(matrix, dtype=float)))
+        return rows
+
+    def run_comparisons(self) -> str:
+        """Find the changes on every aligned pair. Returns a run id."""
+        if self.compare_run["state"] == "running":
+            raise ValueError("A comparison run is already in progress.")
+        pairs = self._aligned_pairs_for_compare()
+        if not pairs:
+            raise ValueError("There are no aligned pairs to compare. Align the drawings first.")
+
+        run_id = f"compare-{uuid.uuid4().hex[:8]}"
+        self._compare_cancel.reset()
+        self.compare_run = {
+            "state": "running",
+            "run_id": run_id,
+            "current": 0,
+            "total": len(pairs),
+            "current_label": None,
+            "message": "Starting…",
+            "error": None,
+            "summary": {},
+            "output_path": None,
+        }
+        self.compare_results = []
+
+        def work() -> None:
+            from collections import Counter
+
+            from engine.compare.pipeline import compare_pair
+            from engine.compare.types import CompareConfig
+
+            try:
+                config = CompareConfig()
+                results: list[object] = []
+                for position, (old_ref, new_ref, matrix) in enumerate(pairs, start=1):
+                    if self._compare_cancel.cancelled:
+                        break
+                    label = (
+                        f"{Path(str(getattr(old_ref, 'abs_path', ''))).name} -> "
+                        f"{Path(str(getattr(new_ref, 'abs_path', ''))).name}"
+                    )
+                    self.compare_run.update(
+                        {
+                            "current": position - 1,
+                            "current_label": label,
+                            "message": f"Comparing… {label}",
+                        }
+                    )
+                    results.append(
+                        compare_pair(
+                            str(getattr(old_ref, "abs_path", "")),
+                            str(getattr(new_ref, "abs_path", "")),
+                            old_page_index=int(getattr(old_ref, "page_index", 0)),
+                            new_page_index=int(getattr(new_ref, "page_index", 0)),
+                            matrix=matrix,
+                            config=config,
+                            scale_denominator=_scale_of(new_ref),
+                        )
+                    )
+
+                self.compare_results = results
+                counts: Counter[str] = Counter()
+                for item in results:
+                    for name, count in getattr(item, "counts", {}).items():
+                        counts[name] += count
+                changed = sum(1 for item in results if getattr(item, "substantive_count", 0) > 0)
+                self.compare_run.update(
+                    {
+                        "state": "cancelled" if self._compare_cancel.cancelled else "done",
+                        "current": len(results),
+                        "total": len(pairs),
+                        "message": (
+                            f"{changed} of {len(results)} sheet(s) changed."
+                            if results
+                            else "Nothing to compare."
+                        ),
+                        "summary": dict(counts),
+                        "output_path": self._write_compare_audit(results),
+                    }
+                )
+            except Exception as exc:
+                logger.exception("Comparison failed")
+                self.compare_run.update({"state": "failed", "error": str(exc)})
+
+        thread = threading.Thread(target=work, name="cqdc-compare", daemon=True)
+        self._threads[run_id] = thread
+        thread.start()
+        return run_id
+
+    def compare_status(self) -> dict[str, object]:
+        return dict(self.compare_run)
+
+    def cancel_compare(self) -> bool:
+        if self.compare_run["state"] == "running":
+            self._compare_cancel.cancel()
+            return True
+        return False
+
+    def wait_for_compare(self, timeout: float = 900.0) -> None:
+        run_id = self.compare_run.get("run_id")
+        thread = self._threads.get(str(run_id)) if run_id else None
+        if thread is not None:
+            thread.join(timeout)
+
+    def _write_compare_audit(self, results: list[object]) -> str | None:
+        """Snapshot the change list into the workspace audit folder."""
+        import json
+        from datetime import UTC, datetime
+
+        if self.workspace is None:
+            return None
+        rows: list[dict[str, object]] = []
+        for item in results:
+            rows.append(
+                {
+                    "old_path": getattr(item, "old_path", ""),
+                    "new_path": getattr(item, "new_path", ""),
+                    "failure": getattr(item, "failure", None),
+                    "counts": getattr(item, "counts", {}),
+                    "substantive_count": getattr(item, "substantive_count", 0),
+                    "regions": [
+                        {
+                            "type": str(region.change_type),
+                            "severity": str(region.severity),
+                            "bbox_mm": [round(value, 2) for value in region.bbox_mm],
+                            "area_mm2": round(region.area_mm2, 2),
+                            "area_site_mm2": (
+                                round(region.area_site_mm2, 2)
+                                if region.area_site_mm2 is not None
+                                else None
+                            ),
+                            "is_cosmetic": region.is_cosmetic,
+                            "text_kind": region.text_kind,
+                            "old_text": region.old_text,
+                            "new_text": region.new_text,
+                            "explanation": region.explanation,
+                        }
+                        for region in getattr(item, "regions", [])
+                    ],
+                }
+            )
+        payload: dict[str, object] = {
+            "written_at": datetime.now(UTC).isoformat(),
+            "count": len(rows),
+            "results": rows,
+        }
+        self.workspace.audit_dir.mkdir(parents=True, exist_ok=True)
+        target = self.workspace.audit_dir / "changes.json"
+        target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        return str(target)
+
     def quarantine_entries(self) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []
         for state in (self.old, self.new):
@@ -823,6 +1041,13 @@ class ComparisonSession:
         }
 
     def reset(self) -> None:
+        """Start a new comparison, keeping nothing from the last one.
+
+        Every stage's results are cleared, not just the scan. Leaving a
+        stale match or alignment behind meant the next comparison could
+        show the previous set's pairs, which is exactly the kind of quiet
+        wrongness this app cannot afford.
+        """
         with self._lock:
             self.old = SideState()
             self.new = SideState()
@@ -831,6 +1056,78 @@ class ComparisonSession:
             self.drawing_list_path = None
             self.list_parse = None
             self.list_match = None
+            self.output_folder = None
+            self.workspace = None
+            self.issue_type = IssueType.UNKNOWN
+            self.issue_type_answer = None
+
+            self.matching = {
+                "state": "idle",
+                "run_id": None,
+                "current": 0,
+                "total": 0,
+                "message": None,
+                "error": None,
+            }
+            self.match_result = None
+            self.match_decisions = {}
+            self.manual_pairs = {}
+
+            self.rename_run = {
+                "kind": None,
+                "state": "idle",
+                "run_id": None,
+                "current": 0,
+                "total": 0,
+                "current_item": None,
+                "completed": 0,
+                "failed": 0,
+                "message": None,
+                "error": None,
+                "failed_items": [],
+                "undo_log_path": None,
+            }
+            self.rename_plan = None
+
+            self.align_run = {
+                "state": "idle",
+                "run_id": None,
+                "current": 0,
+                "total": 0,
+                "current_label": None,
+                "message": None,
+                "error": None,
+                "summary": {},
+                "output_path": None,
+            }
+            self.align_results = []
+            self._align_pair_refs = []
+
+            self.compare_run = {
+                "state": "idle",
+                "run_id": None,
+                "current": 0,
+                "total": 0,
+                "current_label": None,
+                "message": None,
+                "error": None,
+                "summary": {},
+                "output_path": None,
+            }
+            self.compare_results = []
+
+            # The tile index and service are keyed to the old sheets, so
+            # they must not outlive them.
+            for attribute in ("_tile_index", "_tile_index_stamp", "_tile_service"):
+                if hasattr(self, attribute):
+                    delattr(self, attribute)
+
+
+def _scale_of(ref: object) -> int | None:
+    """The drawing scale denominator of a sheet reference, if it has one."""
+    from engine.align.orchestrator import _scale_denominator
+
+    return _scale_denominator(getattr(ref, "scale_text", None))
 
 
 #: One session per running application.

@@ -1,0 +1,168 @@
+/* The home screen: two jobs, side by side, with the seam between them. */
+
+.home {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+.home__inner {
+  max-width: 940px;
+  margin: 0 auto;
+}
+
+.home__head {
+  margin-bottom: var(--space-7);
+}
+
+.home__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-screen-title);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  color: var(--text-hi);
+}
+
+.home__sub {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--text-mid);
+}
+
+/* The seam between the two tools: the app's one memorable element. */
+.home__tools {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  gap: var(--space-6);
+  align-items: stretch;
+}
+
+/* The seam is generated before the cards, so every item is placed
+   explicitly — auto-placement would put it in the first cell and push the
+   two tools onto separate rows. */
+.home__tools::before {
+  content: "";
+  grid-column: 2;
+  grid-row: 1;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--brand) 20%,
+    var(--brand) 80%,
+    transparent
+  );
+  box-shadow: 0 0 12px var(--brand-glow);
+}
+
+.home__tool:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.home__tool:nth-of-type(2) {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.home__tool {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-6);
+  background: var(--room-700);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+}
+
+.home__tool-name {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  color: var(--text-hi);
+}
+
+.home__tool-desc {
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--text-mid);
+}
+
+.home__tool-steps {
+  margin: 0 0 var(--space-6);
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-micro);
+  color: var(--text-low);
+}
+
+.home__tool-go {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+/* Direct links to a stage, once there is something to look at. */
+.home__resume {
+  margin-top: var(--space-7);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--room-300);
+}
+
+.home__resume-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+  text-transform: none;
+  color: var(--text-low);
+}
+
+.home__resume-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.home__link {
+  padding: var(--space-2) var(--space-4);
+  font: inherit;
+  font-size: var(--text-micro);
+  color: var(--text-mid);
+  background: var(--room-500);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.home__link:hover {
+  border-color: var(--room-200);
+  color: var(--text-hi);
+}
+
+.home__link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (max-width: 860px) {
+  .home__tools {
+    grid-template-columns: 1fr;
+  }
+
+  .home__tools::before {
+    display: none;
+  }
+
+  .home__tool:nth-of-type(1),
+  .home__tool:nth-of-type(2) {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}

@@ -15,6 +15,19 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.topbar__brand:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* The seam, reduced to a mark. The same idea used everywhere in the app. */
@@ -36,4 +49,50 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+/* Stage navigation: the app is a graph, so every stage is one click away. */
+.topbar__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topbar__nav::-webkit-scrollbar {
+  display: none;
+}
+
+.topbar__tab {
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-micro);
+  white-space: nowrap;
+  color: var(--text-mid);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.topbar__tab:hover {
+  color: var(--text-hi);
+  background: var(--room-500);
+}
+
+.topbar__tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+/* The active stage carries the brand — chrome, so this is allowed. */
+.topbar__tab[aria-current="page"] {
+  color: var(--text-hi);
+  background: var(--brand-dim);
+  box-shadow: inset 0 -2px 0 var(--brand);
 }

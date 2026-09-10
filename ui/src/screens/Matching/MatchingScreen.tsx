@@ -9,7 +9,6 @@ import type { MatchPair } from '../../api/types';
 import { useAppStore } from '../../store/appStore';
 import {
   autoPairs,
-  canContinue,
   candidatesForThreshold,
   countByStatus,
   decisionFor,
@@ -690,41 +689,34 @@ function UnmatchedPane({
 
 // ── Bottom bar ─────────────────────────────────────────────────────────
 
+/**
+ * The bottom bar.
+ *
+ * Matching used to be a toll gate: alignment and rename were both disabled
+ * until the review had been saved, and rename does not even use the match
+ * result — it plans from the current issue's sheets. So neither is gated
+ * any more. Saving the review is still offered, and still matters (the
+ * engine aligns the pairs it holds), but it is a thing you may do rather
+ * than a thing you must do before you are allowed to leave.
+ */
 function BottomBar() {
   const state = useMatchingStore();
   const goToRename = useAppStore((store) => store.goToRename);
   const goToAlignment = useAppStore((store) => store.goToAlignment);
+  const goToChanges = useAppStore((store) => store.goToChanges);
   const counts = countByStatus(state);
-  const ready = canContinue(state);
   const unresolved = counts.unresolved;
   const nothingSaved = state.accepted.length + state.rejected.length + state.manual.length === 0;
-  // Alignment runs on the engine's copy of the decisions, so it needs either
-  // a completed save or a review with nothing decided yet (nothing to save).
-  const alignReady =
-    state.result !== null && (state.savedUnresolved !== null || nothingSaved);
+  const unsaved = !nothingSaved && state.savedUnresolved === null;
 
   return (
     <div className="matching__bar">
       <p className="matching__bar-sentence" role="status">
         {counts.auto} auto-matched · {unresolved} {unresolved === 1 ? 'needs' : 'need'} review ·{' '}
         {counts.unmatched} unmatched
+        {unsaved && ' · decisions not saved yet'}
       </p>
       <div className="matching__bar-actions">
-        {state.result !== null && (
-          <button
-            type="button"
-            className="matching__align"
-            onClick={goToAlignment}
-            disabled={!alignReady}
-            title={
-              alignReady
-                ? undefined
-                : 'Save the review first — alignment runs on the pairs you accepted'
-            }
-          >
-            Align accepted pairs
-          </button>
-        )}
         <button
           type="button"
           className="button matching__save"
@@ -734,20 +726,16 @@ function BottomBar() {
         >
           {state.saving ? 'Saving…' : 'Save review'}
         </button>
-        <button
-          type="button"
-          className="button button--primary"
-          onClick={goToRename}
-          disabled={!ready}
-          title={
-            ready
-              ? undefined
-              : unresolved > 0
-                ? `${unresolved} ${unresolved === 1 ? 'pair still needs' : 'pairs still need'} a decision before renaming`
-                : 'Save the review before continuing to rename'
-          }
-        >
-          Continue to rename →
+        <button type="button" className="button" onClick={goToRename}>
+          Rename drawings
+        </button>
+        {state.result !== null && (
+          <button type="button" className="matching__align" onClick={goToAlignment}>
+            Alignment
+          </button>
+        )}
+        <button type="button" className="button button--primary" onClick={goToChanges}>
+          Find the changes →
         </button>
       </div>
     </div>

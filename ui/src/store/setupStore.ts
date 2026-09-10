@@ -12,6 +12,7 @@ import {
   ApiError,
   cancelScan,
   clearDrawingList,
+  fetchOutput,
   fetchOutputSuggestion,
   fetchProfiles,
   fetchSheets,
@@ -140,7 +141,15 @@ export const useSetupStore = create<SetupState>((set, get) => ({
 
   init: async () => {
     try {
-      const [profiles, sides] = await Promise.all([fetchProfiles(), fetchSides()]);
+      // The output folder is read back from the engine, not assumed. The
+      // engine may already hold a workspace (it creates one on demand for
+      // the viewer), and a screen that offered "Choose a folder" while the
+      // engine had one was the two disagreeing in public.
+      const [profiles, sides, output] = await Promise.all([
+        fetchProfiles(),
+        fetchSides(),
+        fetchOutput().catch(() => null),
+      ]);
       const byside = Object.fromEntries(sides.map((item) => [item.side, item])) as Record<
         IssueSide,
         SideState
@@ -149,6 +158,7 @@ export const useSetupStore = create<SetupState>((set, get) => ({
         profiles,
         old: byside.old ?? get().old,
         new: byside.new ?? get().new,
+        outputFolder: output?.folder ?? get().outputFolder,
       });
     } catch {
       // The engine may still be starting. The health check reports that.

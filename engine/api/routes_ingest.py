@@ -227,6 +227,21 @@ def output_suggestion() -> dict[str, str | None]:
     return {"folder": str(suggestion) if suggestion else None}
 
 
+@router.get("/output", summary="The output folder in use, if one was chosen")
+def get_output() -> dict[str, object | None]:
+    """What the engine currently has.
+
+    Without this the UI could never restore the chosen folder after a
+    reload, so it showed "Choose a folder" while the engine happily held a
+    live workspace — and the two disagreed until something broke.
+    """
+    session = get_session()
+    return {
+        "folder": session.output_folder,
+        "workspace": session.workspace.as_dict() if session.workspace else None,
+    }
+
+
 @router.post("/output/validate", summary="Check an output folder before using it")
 def validate_output(body: ValidateOutputRequest) -> dict[str, object]:
     session = get_session()

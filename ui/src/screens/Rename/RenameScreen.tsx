@@ -70,7 +70,9 @@ const STATUS_META: Record<RenameActionStatus, { label: string; tone: StatusTone 
  */
 export function RenameScreen() {
   const state = useRenameStore();
-  const goToMatching = useAppStore((store) => store.goToMatching);
+  // Rename plans from the current issue's sheets and never uses the match
+  // result, so its way out is the start, not the matching screen.
+  const goToHome = useAppStore((store) => store.goToHome);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   // On mount: fetch templates + context, reconcile any run left going.
@@ -98,14 +100,14 @@ export function RenameScreen() {
     state.overrides,
   ]);
 
-  if (state.phase === 'running') return <RunningView goToMatching={goToMatching} />;
+  if (state.phase === 'running') return <RunningView goToHome={goToHome} />;
   if (state.phase === 'done' || state.phase === 'failed') {
-    return <ResultView goToMatching={goToMatching} />;
+    return <ResultView goToHome={goToHome} />;
   }
   if (confirmOpen) {
     return (
       <ConfirmApplyDialog
-        goToMatching={goToMatching}
+        goToHome={goToHome}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={(iUnderstand) => {
           setConfirmOpen(false);
@@ -117,7 +119,7 @@ export function RenameScreen() {
 
   return (
     <div className="rename">
-      <RenameHeader goToMatching={goToMatching} />
+      <RenameHeader goToHome={goToHome} />
       <Messages />
 
       <TemplateBuilder />
@@ -129,7 +131,7 @@ export function RenameScreen() {
 
 // ── Shared bits ─────────────────────────────────────────────────────────
 
-function RenameHeader({ goToMatching }: { goToMatching: () => void }) {
+function RenameHeader({ goToHome }: { goToHome: () => void }) {
   const state = useRenameStore();
   const context = useMemo(() => {
     const parts: string[] = [];
@@ -147,8 +149,8 @@ function RenameHeader({ goToMatching }: { goToMatching: () => void }) {
   return (
     <header className="rename__head">
       <div className="rename__title-row">
-        <button type="button" className="rename__back" onClick={goToMatching}>
-          ← Matching
+        <button type="button" className="rename__back" onClick={goToHome}>
+          ← Start
         </button>
         <h1>Rename the current issue</h1>
       </div>
@@ -605,11 +607,11 @@ function BottomBar({ onApply }: { onApply: () => void }) {
 // ── The apply confirmation (full-screen, replaces content) ──────────────
 
 function ConfirmApplyDialog({
-  goToMatching,
+  goToHome,
   onCancel,
   onConfirm,
 }: {
-  goToMatching: () => void;
+  goToHome: () => void;
   onCancel: () => void;
   onConfirm: (iUnderstand: boolean) => void;
 }) {
@@ -630,8 +632,8 @@ function ConfirmApplyDialog({
   return (
     <div className="rename-dialog">
       <div className="rename-dialog__panel" role="dialog" aria-modal="true" aria-label="Apply renames">
-        <button type="button" className="rename__back" onClick={goToMatching}>
-          ← Matching
+        <button type="button" className="rename__back" onClick={goToHome}>
+          ← Start
         </button>
         <h1 className="rename-dialog__title">Apply renames</h1>
 
@@ -698,7 +700,7 @@ function ConfirmApplyDialog({
 
 // ── Running ─────────────────────────────────────────────────────────────
 
-function RunningView({ goToMatching }: { goToMatching: () => void }) {
+function RunningView({ goToHome }: { goToHome: () => void }) {
   const state = useRenameStore();
 
   const event: ProgressEvent | null = useMemo(() => {
@@ -730,7 +732,7 @@ function RunningView({ goToMatching }: { goToMatching: () => void }) {
 
   return (
     <div className="rename">
-      <RenameHeader goToMatching={goToMatching} />
+      <RenameHeader goToHome={goToHome} />
       <Messages />
       <div className="rename__run-panel">
         <ProgressRail event={event} onCancel={() => void state.cancel()} />
@@ -742,7 +744,7 @@ function RunningView({ goToMatching }: { goToMatching: () => void }) {
 
 // ── The result panel (after apply or a failure) ─────────────────────────
 
-function ResultView({ goToMatching }: { goToMatching: () => void }) {
+function ResultView({ goToHome }: { goToHome: () => void }) {
   const state = useRenameStore();
   const failed = state.phase === 'failed';
   const wasUndo = state.kind === 'undo';
@@ -753,7 +755,7 @@ function ResultView({ goToMatching }: { goToMatching: () => void }) {
 
   return (
     <div className="rename">
-      <RenameHeader goToMatching={goToMatching} />
+      <RenameHeader goToHome={goToHome} />
       <Messages />
 
       <div className="rename__result">

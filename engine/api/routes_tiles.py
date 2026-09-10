@@ -89,11 +89,17 @@ def _tiles_dir(session: ComparisonSession) -> Path:
     """The workspace tiles root (``<workspace>/_audit/tiles``).
 
     Tiles must travel with the comparison, so there is no per-session temp
-    fallback: without a workspace there is nowhere legitimate to write.
+    fallback. There is, however, no reason to make the user answer the
+    output-folder question before they may look at a drawing: the
+    suggested folder is derived from the inputs and created on demand.
+    Refusing here is what used to leave the viewer silently blank.
     """
     workspace = session.workspace
     if workspace is None:
-        raise ValidationError("Choose an output folder before viewing sheets.")
+        try:
+            workspace = session.ensure_workspace()
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
     return tiles_root(workspace)
 
 
