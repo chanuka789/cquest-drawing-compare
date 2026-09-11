@@ -21,6 +21,7 @@ import type {
   IssueType,
   ListParseResult,
   ManualPoint,
+  MaskTemplatesPayload,
   MatchDecisionsResponse,
   MatchResult,
   MatchStatus,
@@ -32,7 +33,9 @@ import type {
   RenamePlan,
   RenameStatus,
   RenameTemplate,
+  SaveMaskResponse,
   SheetProfileOption,
+  SheetTemplate,
   SheetRow,
   SideState,
   TileManifest,
@@ -415,6 +418,61 @@ function tilePath(sheetId: string, level: number, x: number, y: number): string 
   return `/api/tiles/${encodeURIComponent(sheetId)}/${level}/${x}/${y}.png`;
 }
 
+// ── Phase 5: masking ───────────────────────────────────────────────────
+
+/**
+ * Cluster the new issue's sheets and detect zones once per cluster.
+ *
+ * A project of three hundred sheets normally falls into two or three
+ * templates, so the user confirms two or three sheets rather than three
+ * hundred. Detection on three hundred sheets is unreliable; a template a
+ * human confirmed is not.
+ */
+export function fetchMaskTemplates(): Promise<MaskTemplatesPayload> {
+  return get<MaskTemplatesPayload>('/api/mask/templates');
+}
+
+export function fetchMask(templateId: string): Promise<SheetTemplate> {
+  return get<SheetTemplate>(`/api/mask/${encodeURIComponent(templateId)}`);
+}
+
+/** The editor's primary action: confirm once, apply to the whole cluster. */
+export function saveMask(
+  templateId: string,
+  zones: SheetTemplate['zones'],
+  protectedRegions: SheetTemplate['protected'],
+  profileId?: string,
+): Promise<SaveMaskResponse> {
+  return request<SaveMaskResponse>(`/api/mask/${encodeURIComponent(templateId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      zones: zones.map((zone) => ({
+        type: zone.type,
+        rect: zone.rect,
+        polygon: zone.polygon,
+        label: zone.label,
+        enabled: zone.enabled,
+        ink_only: zone.ink_only,
+        ink_threshold: zone.ink_threshold,
+        match_text: zone.match_text,
+      })),
+      protected: protectedRegions.map((region) => ({
+        type: region.type,
+        rect: region.rect,
+        label: region.label,
+      })),
+      profile_id: profileId ?? '',
+    }),
+  });
+}
+
+/** Reuse a mask saved from another project on this template. */
+export function loadMaskProfile(templateId: string, profileId: string): Promise<SheetTemplate> {
+  return post<SheetTemplate>(
+    `/api/mask/${encodeURIComponent(templateId)}/load/${encodeURIComponent(profileId)}`,
+  );
+}
+
 /** What tile levels exist for one rendered sheet. */
 export function fetchTileManifest(sheetId: string): Promise<TileManifest> {
   return get<TileManifest>(`/api/tiles/${encodeURIComponent(sheetId)}/manifest`);
@@ -430,6 +488,19 @@ export function fetchTileManifest(sheetId: string): Promise<TileManifest> {
  */
 export function tileUrl(sheetId: string, level: number, x: number, y: number): string {
   const path = tilePath(sheetId, level, x, y);
+  const base = apiBaseSync();
+  return base === null ? path : `${base}${path}`;
+}
+
+/**
+ * The URL of one sheet's level-0 thumbnail, for `<img src>`.
+ *
+ * Synchronous like `tileUrl`, and for the same reason: it is used where a
+ * render, not a fetch, needs the address. Callers always make an API call
+ * before showing a sheet, which is what resolves the base URL.
+ */
+export function thumbnailUrl(sheetId: string): string {
+  const path = `/api/tiles/${encodeURIComponent(sheetId)}/thumbnail.png`;
   const base = apiBaseSync();
   return base === null ? path : `${base}${path}`;
 }

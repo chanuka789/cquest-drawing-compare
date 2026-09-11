@@ -71,21 +71,64 @@ Ruff `target-version` stays at `py313` so the code remains 3.13-compatible.
 - Tests: `pytest`
 - Lint: `ruff check . && ruff format .`
 - Build exe: `pyinstaller packaging/build.spec` (or `.\packaging\build.ps1`)
+- Phase 5 fixtures: `python -m tests.build_phase5_fixtures`
+  (add `--golden` to re-measure precision/recall and rewrite
+  `tests/phase5_golden.json` — deliberate, never reflexive)
 
 ## Current phase
 
-Phase 4 — Render and align. Rasterising sheets into tiles, computing
-the transform that maps the old sheet onto the new one, and the
-lightbox viewer. No change detection yet — that is Phase 5.
+Phase 5 — Compare and mask. Finding real changes between aligned sheets.
+Clustering into readable regions, severity scoring, and reporting are
+Phase 6. Phase 5 produces raw, filtered change records.
 
-Phase 3 (matching & rename) is built and its rules still apply to that
-code: renames never touch the input folders and always write a full,
-verified undo log; matching is a global assignment problem; nothing
-below the confidence threshold is auto-applied. Phase 2 (intake &
-register) likewise: scan progressively, cache by (path, size, mtime),
-every drawing number records HOW it was found, a missing drawing in a
-partial issue is not a deletion, and the app never writes into the
-input folders.
+Phase 4 (render & align) is built and its rules still apply to that code:
+refusing to align is a correct outcome, similarity by default, and every
+error is reported in millimetres. Phase 3 (matching & rename) likewise:
+renames never touch the input folders and always write a full, verified
+undo log; matching is a global assignment problem; nothing below the
+confidence threshold is auto-applied. Phase 2 (intake & register): scan
+progressively, cache by (path, size, mtime), every drawing number records
+HOW it was found, a missing drawing in a partial issue is not a deletion,
+and the app never writes into the input folders.
+
+## Phase 5 rules
+
+- A false positive costs more than a missed change. When a difference
+  could be cosmetic, mark it cosmetic and hide it by default.
+- Text changes are the highest-value output. They get their own stream
+  and their own report section. Never let them get buried under geometry.
+- All tolerances are specified by the user in real-world millimetres at
+  drawing scale, converted per sheet. Never expose pixels to the user.
+- Never report a hatch region as thousands of individual line changes.
+  One region, one change.
+- If every stroke on the sheet shows a thin halo of difference, that is
+  alignment residual, not a design change. Detect it and say so.
+- The gate for this phase: `rev_letter_only` must report ZERO changes.
+
+### Phase 5 facts learned the hard way
+
+- **A watermark cannot be masked by its bounding box.** A 45-degree
+  `PRELIMINARY` across an A1 sheet has a box covering a third of the
+  drawing. Pale watermarks are excluded by *ink value* instead
+  (`Zone.ink_only`), and the threshold comes from the **mode** of the pale
+  ink in the box, never the mean — the mean is dragged down by the drawing
+  underneath and then eats the drawing's own anti-aliased lines.
+- **A PDF reader returns the text inside a run's box.** A large watermark's
+  glyphs overlap the labels beneath it, so `RM-02` comes back as
+  `RM-02 P`. `MaskSet.clean_text` strips those, and `merge_runs` refuses to
+  merge runs of wildly different heights.
+- **Identical text still moves when the font is substituted.** Glyph
+  metrics set the box, so the centre shifts without anything moving. Text
+  counts as moved only when the boxes stop overlapping.
+- **Hatch is fine AND short.** Requiring both (spacing under 4 mm on paper,
+  segments under 15 mm) is what separates a hatched wall from a setting-out
+  grid, a stair and a run of joists.
+- **Protection beats masking, so protection must be clipped.** A general
+  notes column that reaches into the title block un-masks the revision
+  letter, and then every sheet in the project reports it as a change.
+- **The alignment matrix is resolution-dependent.** It maps pixels to
+  pixels, so comparing at a different DPI from aligning needs
+  `M' = S M S⁻¹`. Missing it shifts the whole old sheet.
 
 ## Phase 4 rules
 

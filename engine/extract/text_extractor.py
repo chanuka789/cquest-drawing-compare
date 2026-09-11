@@ -147,6 +147,12 @@ def _page_box(page: pdfium.PdfPage) -> PageBox:
 MERGE_GAP_RATIO = 0.6
 #: How far apart two runs' baselines may be and still count as one line.
 MERGE_BASELINE_RATIO = 0.3
+#: The shorter run must be at least this fraction of the taller one's height.
+#: Without it, a 45-degree `PRELIMINARY` watermark — whose glyph box is a
+#: thousand points tall — treats every label near it as being on its own
+#: baseline and swallows them, so masking the watermark would take real
+#: drawing text with it.
+MERGE_HEIGHT_RATIO = 0.5
 
 
 def merge_runs(items: list[TextItem]) -> list[TextItem]:
@@ -171,10 +177,12 @@ def merge_runs(items: list[TextItem]) -> list[TextItem]:
 
         previous = merged[-1]
         height = max(previous.height, item.height)
+        shortest = min(previous.height, item.height)
+        comparable = height > 0 and shortest / height >= MERGE_HEIGHT_RATIO
         same_line = abs(item.y - previous.y) <= height * MERGE_BASELINE_RATIO
         gap = item.x - previous.right
 
-        if same_line and -height * 0.2 <= gap <= height * MERGE_GAP_RATIO:
+        if comparable and same_line and -height * 0.2 <= gap <= height * MERGE_GAP_RATIO:
             joiner = "" if gap <= 0 else " "
             text = f"{previous.text.rstrip()}{joiner}{item.text.lstrip()}"
             right = max(previous.right, item.right)

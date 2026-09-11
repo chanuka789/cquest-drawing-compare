@@ -92,9 +92,7 @@ def _row_for(index: int, item: Any, refs: list[tuple[Any, Any]]) -> dict[str, An
         "note": getattr(item, "note", ""),
         "duration_s": round(float(getattr(item, "duration_s", 0.0)), 3),
         "matrix": _matrix_to_list(getattr(item, "matrix", None)),
-        "explanation": getattr(assessment, "explanation", "")
-        if assessment is not None
-        else "",
+        "explanation": getattr(assessment, "explanation", "") if assessment is not None else "",
         "rms_mm_on_paper": getattr(assessment, "rms_mm_on_paper", None)
         if assessment is not None
         else None,

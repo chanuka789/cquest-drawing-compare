@@ -105,8 +105,7 @@ def test_renamed_pair_matcher_zero_wrong_pairs(tmp_path):
     result = match_sets(old_sheets, new_sheets, fingerprint_for=_fingerprint_resolver(fingerprints))
 
     expected = {
-        _old_name(old_no, title): _new_name(new_no)
-        for old_no, new_no, title, _body in RENAMED_SET
+        _old_name(old_no, title): _new_name(new_no) for old_no, new_no, title, _body in RENAMED_SET
     }
     paired = {pair.old.filename: pair.new.filename for pair in result.pairs}
     assert paired == expected
@@ -119,9 +118,7 @@ def test_renamed_pair_matcher_zero_wrong_pairs(tmp_path):
     assert [sheet.filename for sheet in result.old_unmatched] == [
         _old_name(RENAMED_OLD_ONLY[0], RENAMED_OLD_ONLY[1])
     ]
-    assert [sheet.filename for sheet in result.new_unmatched] == [
-        _new_name(RENAMED_NEW_ONLY[0])
-    ]
+    assert [sheet.filename for sheet in result.new_unmatched] == [_new_name(RENAMED_NEW_ONLY[0])]
 
 
 def test_naming_mess_every_name_cleans_to_one_key(tmp_path):

@@ -45,6 +45,15 @@ hiddenimports = [
     *collect_submodules("webview.platforms"),
     "engine.api.routes_system",
     "engine.api.routes_naming",
+    # Phase 5. The comparison runs in a process pool, and a pool worker
+    # imports the orchestrator by name rather than inheriting it, so static
+    # analysis cannot see these either.
+    *collect_submodules("engine.compare"),
+    *collect_submodules("engine.masking"),
+    "engine.api.routes_changes",
+    "engine.api.routes_masks",
+    "engine.extract.vector_extractor",
+    "engine.storage.change_store",
 ]
 
 a = Analysis(

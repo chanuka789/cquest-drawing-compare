@@ -16,7 +16,15 @@ from loguru import logger
 from sqlalchemy import Engine, create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from engine.storage.schema import SCHEMA_VERSION, Base, Meta, RenameLog
+from engine.storage.schema import (
+    SCHEMA_VERSION,
+    Base,
+    ChangeHatch,
+    ComparisonRun,
+    FilteredChange,
+    Meta,
+    RenameLog,
+)
 from engine.utils.errors import NotFoundError, SchemaVersionError
 
 #: Key used in the `meta` table.
@@ -33,10 +41,59 @@ def _migrate_1_to_2(engine: Engine) -> None:
     logger.info("Migrated project database to schema 2 (rename_log rebuilt)")
 
 
+def _migrate_2_to_3(engine: Engine) -> None:
+    """2 -> 3: Phase 5 comparison storage.
+
+    `change` and `change_text` gain the columns the comparison engine needs
+    (which streams found it, its category, the numeric delta, the
+    cross-check verdict), and three tables arrive: `change_hatch`,
+    `comparison_run` and `filtered_change`.
+
+    Existing rows are kept. Phase 5 is the first phase to write any of these
+    tables, so in practice there are none — but a migration that drops a
+    user's data because the author assumed it was empty is not a migration.
+    """
+    new_change_columns = {
+        "kind": "VARCHAR(32)",
+        "streams": "VARCHAR(64)",
+        "category": "VARCHAR(32)",
+        "confidence": "FLOAT DEFAULT 0.0 NOT NULL",
+        "area_m2": "FLOAT",
+        "geometry_type": "VARCHAR(24)",
+        "detail_json": "TEXT",
+    }
+    new_text_columns = {
+        "category": "VARCHAR(24)",
+        "old_x": "FLOAT",
+        "old_y": "FLOAT",
+        "new_x": "FLOAT",
+        "new_y": "FLOAT",
+        "distance_moved_mm": "FLOAT",
+        "numeric_delta": "FLOAT",
+        "percent_delta": "FLOAT",
+        "cross_check_flag": "VARCHAR(40)",
+        "similarity": "FLOAT",
+    }
+
+    with engine.begin() as connection:
+        for table, columns in (("change", new_change_columns), ("change_text", new_text_columns)):
+            existing = {
+                row[1] for row in connection.execute(text(f"PRAGMA table_info({table})")).all()
+            }
+            for name, definition in columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+
+    ChangeHatch.__table__.create(engine, checkfirst=True)
+    ComparisonRun.__table__.create(engine, checkfirst=True)
+    FilteredChange.__table__.create(engine, checkfirst=True)
+    logger.info("Migrated project database to schema 3 (Phase 5 comparison storage)")
+
+
 #: Version-to-version migration steps. Each entry upgrades a file at that
 #: version to the next one. Fresh files are created at SCHEMA_VERSION, so only
 #: files written by an older build ever run a migration.
-MIGRATIONS: dict[int, Callable[[Engine], None]] = {1: _migrate_1_to_2}
+MIGRATIONS: dict[int, Callable[[Engine], None]] = {1: _migrate_1_to_2, 2: _migrate_2_to_3}
 
 
 @event.listens_for(Engine, "connect")

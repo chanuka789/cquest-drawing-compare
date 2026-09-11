@@ -370,9 +370,7 @@ def align_phase_correlation(
                 f"{old_gray.shape} vs {new_gray.shape}",
             )
 
-        def estimate(
-            candidate_old: np.ndarray, steps: int
-        ) -> tuple[np.ndarray, float] | None:
+        def estimate(candidate_old: np.ndarray, steps: int) -> tuple[np.ndarray, float] | None:
             """Run the rotation/scale/translation estimate for one candidate.
 
             Returns the full-resolution matrix mapping *candidate_old* pixels
@@ -406,9 +404,7 @@ def align_phase_correlation(
                 scale = math.exp(dx * math.log(max_radius) / LOG_COLS_EFFECTIVE)
                 if not math.isfinite(scale) or not min_scale <= scale <= max_scale:
                     return None
-                matrix = _similarity_about_center(
-                    work_width, work_height, rotation, scale
-                ) @ matrix
+                matrix = _similarity_about_center(work_width, work_height, rotation, scale) @ matrix
             if not converged:
                 return None
 

@@ -516,3 +516,92 @@ export interface ManualPoint {
   new_x: number;
   new_y: number;
 }
+
+// ── Phase 5: masking and comparison ─────────────────────────────────────
+
+/**
+ * A rectangle in page fractions, y DOWN from the top-left corner. Zones are
+ * stored this way so a template detected once applies to every sheet in its
+ * cluster, whatever the sheet size and whatever the render resolution.
+ */
+export interface FracRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export type ZoneType =
+  | 'titleblock'
+  | 'revision_table'
+  | 'logo'
+  | 'watermark'
+  | 'stamp'
+  | 'annotation'
+  | 'frame'
+  | 'user';
+
+/** One excluded region, with the evidence for why it was excluded. */
+export interface MaskZone {
+  type: ZoneType;
+  rect: FracRect;
+  polygon: [number, number][];
+  label: string;
+  confidence: number;
+  /** Why the application thinks this is what it says it is. Shown verbatim. */
+  evidence: string[];
+  enabled: boolean;
+  user_edited: boolean;
+  /** Below 0.7 the zone is proposed rather than applied on its own. */
+  needs_confirmation: boolean;
+  /**
+   * True for a pale watermark: only its own ink is excluded, not everything
+   * inside its box. A 45° stamp's box covers a third of the sheet.
+   */
+  ink_only: boolean;
+  ink_threshold: number;
+  match_text: string;
+}
+
+export type ProtectedType =
+  | 'north_arrow'
+  | 'scale_bar'
+  | 'key_plan'
+  | 'general_notes'
+  | 'user_protected';
+
+/** A region the application deliberately kept comparing. Beats any mask. */
+export interface ProtectedRegion {
+  type: ProtectedType;
+  rect: FracRect;
+  label: string;
+  confidence: number;
+  evidence: string[];
+}
+
+/** One cluster of sheets that share a frame, with the zones for all of them. */
+export interface SheetTemplate {
+  template_id: string;
+  members: number[];
+  representative: number;
+  sheet_count: number;
+  zones: MaskZone[];
+  protected: ProtectedRegion[];
+  /** True once a user has looked at it. Detection is never trusted alone. */
+  confirmed: boolean;
+  representative_sheet_id: string;
+  member_sheet_ids: string[];
+}
+
+export interface MaskTemplatesPayload {
+  templates: SheetTemplate[];
+  sheet_count: number;
+}
+
+export interface SaveMaskResponse {
+  template_id: string;
+  applied_to: number;
+  zones: number;
+  protected: number;
+  confirmed: boolean;
+}

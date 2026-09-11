@@ -42,6 +42,7 @@ select = [
 ignore = [
     "ANN401",  # allow typing.Any where it is genuinely needed
     "B008",    # FastAPI Depends() in defaults is idiomatic
+    "RUF001",  # drawing text genuinely contains en dashes and arrows
 ]
 
 [tool.ruff.lint.per-file-ignores]

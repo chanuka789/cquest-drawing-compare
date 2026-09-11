@@ -1,0 +1,172 @@
+{
+  "cases": {
+    "change_under_watermark": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "change_with_replot": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "colour_vs_mono": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "dimension_only": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "font_substituted": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "hatch_change": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "layer_toggled": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "level_change": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "line_type": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "line_weight": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "object_added": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "object_moved": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "object_removed": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "real_heavy": {
+      "cosmetic_only": false,
+      "covered": 8,
+      "expected": 8,
+      "false_positives": 0,
+      "matched": 8,
+      "reported": 8
+    },
+    "real_small": {
+      "cosmetic_only": false,
+      "covered": 3,
+      "expected": 3,
+      "false_positives": 0,
+      "matched": 3,
+      "reported": 3
+    },
+    "renumbered": {
+      "cosmetic_only": false,
+      "covered": 4,
+      "expected": 4,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "rev_letter_only": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "spec_change": {
+      "cosmetic_only": false,
+      "covered": 1,
+      "expected": 1,
+      "false_positives": 0,
+      "matched": 1,
+      "reported": 1
+    },
+    "watermark_and_rev": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    },
+    "watermarked": {
+      "cosmetic_only": true,
+      "covered": 0,
+      "expected": 0,
+      "false_positives": 0,
+      "matched": 0,
+      "reported": 0
+    }
+  },
+  "summary": {
+    "cases": 20,
+    "cosmetic_false_positives": 0,
+    "failed_cases": [],
+    "false_positives": 0,
+    "precision": 1.0,
+    "recall": 1.0
+  }
+}

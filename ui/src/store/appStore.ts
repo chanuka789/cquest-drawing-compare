@@ -13,7 +13,15 @@ import type { HealthResponse } from '../api/types';
 import { isDesktop } from '../lib/native';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'ready' | 'error';
-export type ScreenName = 'setup' | 'register' | 'matching' | 'rename' | 'alignment' | 'manual';
+export type ScreenName =
+  | 'setup'
+  | 'register'
+  | 'matching'
+  | 'rename'
+  | 'alignment'
+  | 'manual'
+  /** Phase 5: what is never compared, confirmed once per sheet template. */
+  | 'mask';
 
 interface AppState {
   status: ConnectionStatus;
@@ -30,6 +38,7 @@ interface AppState {
   goToRename: () => void;
   goToAlignment: () => void;
   goToManual: () => void;
+  goToMask: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -59,4 +68,5 @@ export const useAppStore = create<AppState>((set) => ({
   goToRename: () => set({ screen: 'rename' }),
   goToAlignment: () => set({ screen: 'alignment' }),
   goToManual: () => set({ screen: 'manual' }),
+  goToMask: () => set({ screen: 'mask' }),
 }));
