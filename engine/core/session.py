@@ -140,6 +140,23 @@ class ComparisonSession:
         self._align_cancel = CancelToken()
         #: (old, new) sheet references the current run was built from.
         self._align_pair_refs: list[tuple[object, object]] = []
+        #: Phase 5 comparison state. See :meth:`run_comparisons`.
+        self.compare_run: dict[str, object] = {
+            "state": "idle",
+            "run_id": None,
+            "current": 0,
+            "total": 0,
+            "current_label": None,
+            "message": None,
+            "error": None,
+            "summary": {},
+        }
+        #: pair_id -> ComparisonResult, kept in memory for the report screen.
+        self.compare_results: dict[str, object] = {}
+        self._compare_cancel = CancelToken()
+        #: template_id -> SheetTemplate, from the mask editor. Detected once
+        #: per cluster and confirmed by the user, never per sheet.
+        self.mask_templates: dict[str, object] = {}
 
     # -- sides ---------------------------------------------------------
 
@@ -286,9 +303,7 @@ class ComparisonSession:
             reporter = RunReporter(run_id, Stage.MATCH, total=int(self.matching["total"]))
             try:
                 reporter.started()
-                memo = fingerprints_memo(
-                    [*self.old.sheets, *self.new.sheets], self.cache
-                )
+                memo = fingerprints_memo([*self.old.sheets, *self.new.sheets], self.cache)
                 result = matcher_module.match_sets(
                     self.old.sheets,
                     self.new.sheets,
@@ -393,9 +408,7 @@ class ComparisonSession:
 
         self.workspace.audit_dir.mkdir(parents=True, exist_ok=True)
         target = self.workspace.audit_dir / "matching.json"
-        target.write_text(
-            json.dumps(payload, indent=2, default=str), encoding="utf-8"
-        )
+        target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         return str(target)
 
     # -- Phase 3: rename --------------------------------------------------
@@ -430,9 +443,7 @@ class ComparisonSession:
         output_dir = None
         if self.workspace is not None:
             output_dir = (
-                self.workspace.renamed_dir
-                if mode == "copy"
-                else Path(self.new.folder or "").parent
+                self.workspace.renamed_dir if mode == "copy" else Path(self.new.folder or "").parent
             )
         plan = build_plan(
             self.new.sheets,
@@ -514,16 +525,15 @@ class ComparisonSession:
                         "undo_log_path": str(outcome.undo_log_path)
                         if outcome.undo_log_path
                         else None,
-                        "message": f"Renamed {outcome.completed} file(s)." if not outcome.cancelled
+                        "message": f"Renamed {outcome.completed} file(s)."
+                        if not outcome.cancelled
                         else f"Stopped after {outcome.completed} file(s).",
                     }
                 )
                 self._mirror_rename_log(log_path)
             except Exception as exc:
                 logger.exception("Rename failed")
-                self.rename_run.update(
-                    {"state": "failed", "error": str(exc), "message": None}
-                )
+                self.rename_run.update({"state": "failed", "error": str(exc), "message": None})
 
         thread = threading.Thread(target=work, name="cqdc-rename", daemon=True)
         self._threads[run_id] = thread
@@ -592,8 +602,7 @@ class ComparisonSession:
                         "failed": len(outcome.failed),
                         "failed_items": outcome.failed,
                         "undo_log_path": str(log_path),
-                        "message": outcome.reason
-                        or f"Undid {outcome.reversed} rename(s).",
+                        "message": outcome.reason or f"Undid {outcome.reversed} rename(s).",
                     }
                 )
                 self._mirror_rename_log(log_path)
@@ -724,9 +733,7 @@ class ComparisonSession:
                 counts = Counter(str(getattr(item, "verdict", "failed")) for item in results)
                 self.align_run.update(
                     {
-                        "state": "cancelled"
-                        if self._align_cancel.cancelled
-                        else "done",
+                        "state": "cancelled" if self._align_cancel.cancelled else "done",
                         "current": len(results),
                         "total": len(refs),
                         "message": f"Aligned {len(results)} pair(s).",
@@ -761,6 +768,146 @@ class ComparisonSession:
             self._align_cancel.cancel()
             return True
         return False
+
+    # -- Phase 5: comparison -------------------------------------------
+
+    def pending_compare_pairs(self) -> list[tuple[object, object]]:
+        """Pairs whose alignment succeeded, ready to compare.
+
+        A pair that did not align is not queued. Comparing two sheets that
+        did not align produces a confident wrong answer, which is the one
+        outcome this application refuses to produce.
+        """
+        from engine.compare.orchestrator import AlignmentInput, PairInput, SheetSource
+
+        if not self.align_results:
+            raise ValueError("Align the drawings before comparing them.")
+
+        refs = list(self._align_pair_refs)
+        queued: list[tuple[object, object]] = []
+        for index, item in enumerate(self.align_results):
+            if index >= len(refs):
+                break
+            old_ref, new_ref = refs[index]
+            verdict = str(getattr(item, "verdict", "failed"))
+            matrix = getattr(item, "matrix", None)
+            pair = PairInput(
+                old=SheetSource(
+                    path=str(getattr(old_ref, "abs_path", "")),
+                    page_index=int(getattr(old_ref, "page_index", 0)),
+                    scale_text=getattr(old_ref, "scale_text", None),
+                ),
+                new=SheetSource(
+                    path=str(getattr(new_ref, "abs_path", "")),
+                    page_index=int(getattr(new_ref, "page_index", 0)),
+                    scale_text=getattr(new_ref, "scale_text", None),
+                ),
+                pair_id=f"pair-{index}",
+                label=str(getattr(new_ref, "name", "") or f"pair {index + 1}"),
+            )
+            alignment = AlignmentInput(
+                matrix=matrix,
+                verdict=verdict,
+                dpi=200,
+                user_override=self.compare_overrides.get(f"pair-{index}", False),
+            )
+            queued.append((pair, alignment))
+        return queued
+
+    @property
+    def compare_overrides(self) -> dict[str, bool]:
+        """Pairs the user chose to compare despite a poor alignment."""
+        if not hasattr(self, "_compare_overrides"):
+            self._compare_overrides: dict[str, bool] = {}
+        return self._compare_overrides
+
+    def run_comparisons(self, pair_ids: list[str] | None = None) -> str:
+        """Compare the aligned pairs on a worker thread. Returns a run id."""
+        if self.compare_run["state"] == "running":
+            raise ValueError("A comparison run is already in progress.")
+        queued = self.pending_compare_pairs()
+        if pair_ids:
+            wanted = set(pair_ids)
+            queued = [entry for entry in queued if entry[0].pair_id in wanted]
+        if not queued:
+            raise ValueError("There are no aligned pairs to compare.")
+
+        run_id = f"compare-{uuid.uuid4().hex[:8]}"
+        self._compare_cancel.reset()
+        self.compare_run = {
+            "state": "running",
+            "run_id": run_id,
+            "current": 0,
+            "total": len(queued),
+            "current_label": None,
+            "message": "Starting…",
+            "error": None,
+            "summary": {},
+        }
+
+        def work() -> None:
+            from engine.compare.orchestrator import compare_batch
+
+            try:
+                results = compare_batch(
+                    queued,
+                    progress_callback=self._compare_progress,
+                    workers=1,
+                    should_cancel=lambda: self._compare_cancel.cancelled,
+                    already_done=set(self.compare_results),
+                )
+                for result in results:
+                    self.compare_results[result.pair_id] = result
+                reportable = sum(len(result.reportable) for result in results)
+                cosmetic = sum(len(result.cosmetic) for result in results)
+                skipped = sum(1 for result in results if result.skipped)
+                self.compare_run.update(
+                    {
+                        "state": "cancelled" if self._compare_cancel.cancelled else "done",
+                        "current": len(results),
+                        "message": f"Compared {len(results)} pair(s).",
+                        "summary": {
+                            "pairs": len(results),
+                            "reportable": reportable,
+                            "cosmetic": cosmetic,
+                            "skipped": skipped,
+                        },
+                    }
+                )
+            except Exception as exc:
+                logger.exception("Comparison failed")
+                self.compare_run.update({"state": "failed", "error": str(exc)})
+
+        thread = threading.Thread(target=work, name="cqdc-compare", daemon=True)
+        self._threads[run_id] = thread
+        thread.start()
+        return run_id
+
+    def _compare_progress(self, completed: int, total: int, current_label: str) -> None:
+        self.compare_run.update(
+            {
+                "current": completed,
+                "total": total,
+                "current_label": current_label,
+                "message": f"Comparing… {current_label}",
+            }
+        )
+
+    def compare_status(self) -> dict[str, object]:
+        return dict(self.compare_run)
+
+    def cancel_comparison(self) -> bool:
+        if self.compare_run["state"] == "running":
+            self._compare_cancel.cancel()
+            return True
+        return False
+
+    def wait_for_comparison(self, timeout: float = 600.0) -> None:
+        """Block until the comparison run finishes. For tests and the CLI."""
+        run_id = self.compare_run.get("run_id")
+        thread = self._threads.get(str(run_id)) if run_id else None
+        if thread is not None:
+            thread.join(timeout)
 
     def _write_alignment_audit(self, results: list[object]) -> str | None:
         """Snapshot the alignment run into the workspace audit folder."""

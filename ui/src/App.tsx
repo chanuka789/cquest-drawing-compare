@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 
 import { TopBar } from './components/TopBar';
 import { AlignmentScreen } from './screens/Alignment';
+import { MaskEditor } from './screens/Compare';
 import { ManualAlignScreen } from './screens/Manual';
 import { MatchingScreen } from './screens/Matching';
 import { RegisterScreen } from './screens/Register';
@@ -28,6 +29,7 @@ export default function App() {
       {screen === 'rename' && <RenameScreen />}
       {screen === 'alignment' && <AlignmentScreen />}
       {screen === 'manual' && <ManualAlignScreen />}
+      {screen === 'mask' && <MaskEditor />}
     </div>
   );
 }

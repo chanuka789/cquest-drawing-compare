@@ -23,7 +23,7 @@ from sqlalchemy.types import TypeDecorator
 
 #: Bumped whenever the schema changes. Stored in the `meta` table of every
 #: project file so a future version can migrate an older project.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def utc_now() -> datetime:
@@ -174,7 +174,13 @@ class Alignment(Base):
 
 
 class Change(Base):
-    """One detected change region. Coordinates are in sheet space."""
+    """One detected change region.
+
+    Coordinates are **millimetres on the paper of the new sheet**, measured
+    from its top-left corner with y running down. Never pixels: a pixel box
+    means nothing without the DPI that produced it, and the DPI is a setting
+    the user can change between runs.
+    """
 
     __tablename__ = "change"
     __table_args__ = (Index("ix_change_pair_status", "pair_id", "user_status"),)
@@ -194,7 +200,25 @@ class Change(Base):
     description: Mapped[str | None] = mapped_column(Text, default=None)
     user_status: Mapped[str] = mapped_column(String(16), default="open")  # UserStatus
 
+    # ── Phase 5 ──────────────────────────────────────────────────────
+    #: The engine's own, finer verdict: moved, style_only, hatch_added, ...
+    kind: Mapped[str | None] = mapped_column(String(32), default=None)  # ChangeKind
+    #: Which streams found it, comma separated. Two streams agreeing is
+    #: stronger evidence than either alone, and the user can see that.
+    streams: Mapped[str | None] = mapped_column(String(64), default=None)
+    #: Text category, hatch, or the geometry type.
+    category: Mapped[str | None] = mapped_column(String(32), default=None)
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    #: Real-world area at drawing scale, when the scale is known.
+    area_m2: Mapped[float | None] = mapped_column(default=None)
+    geometry_type: Mapped[str | None] = mapped_column(String(24), default=None)
+    #: Free-form evidence for the debug view, as JSON.
+    detail_json: Mapped[str | None] = mapped_column(Text, default=None)
+
     texts: Mapped[list[ChangeText]] = relationship(
+        back_populates="change", cascade="all, delete-orphan"
+    )
+    hatches: Mapped[list[ChangeHatch]] = relationship(
         back_populates="change", cascade="all, delete-orphan"
     )
 
@@ -210,7 +234,96 @@ class ChangeText(Base):
     new_text: Mapped[str | None] = mapped_column(Text, default=None)
     kind: Mapped[str | None] = mapped_column(String(16), default=None)  # TextChangeKind
 
+    # ── Phase 5 ──────────────────────────────────────────────────────
+    category: Mapped[str | None] = mapped_column(String(24), default=None)  # TextCategory
+    old_x: Mapped[float | None] = mapped_column(default=None)
+    old_y: Mapped[float | None] = mapped_column(default=None)
+    new_x: Mapped[float | None] = mapped_column(default=None)
+    new_y: Mapped[float | None] = mapped_column(default=None)
+    #: How far it moved, in real-world millimetres at drawing scale.
+    distance_moved_mm: Mapped[float | None] = mapped_column(default=None)
+    numeric_delta: Mapped[float | None] = mapped_column(default=None)
+    percent_delta: Mapped[float | None] = mapped_column(default=None)
+    #: dimension_text_only / geometry_moved_dimension_stale / consistent.
+    cross_check_flag: Mapped[str | None] = mapped_column(String(40), default=None)
+    similarity: Mapped[float | None] = mapped_column(default=None)
+
     change: Mapped[Change] = relationship(back_populates="texts")
+
+
+class ChangeHatch(Base):
+    """A hatched region that changed. One row per region, never per segment."""
+
+    __tablename__ = "change_hatch"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change.id", ondelete="CASCADE"))
+    old_signature: Mapped[str | None] = mapped_column(String(64), default=None)
+    new_signature: Mapped[str | None] = mapped_column(String(64), default=None)
+    old_angle_deg: Mapped[float | None] = mapped_column(default=None)
+    new_angle_deg: Mapped[float | None] = mapped_column(default=None)
+    old_area_m2: Mapped[float | None] = mapped_column(default=None)
+    new_area_m2: Mapped[float | None] = mapped_column(default=None)
+    area_delta_m2: Mapped[float | None] = mapped_column(default=None)
+    segment_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    change: Mapped[Change] = relationship(back_populates="hatches")
+
+
+class ComparisonRun(Base):
+    """One comparison of one pair, with everything needed to reproduce it.
+
+    If this output ever supports a variation claim, somebody will ask how the
+    number was arrived at. The configuration snapshot, the tolerances and the
+    engine version are the answer, so they are stored, not recomputed.
+    """
+
+    __tablename__ = "comparison_run"
+    __table_args__ = (Index("ix_comparison_run_pair", "pair_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pair_id: Mapped[int] = mapped_column(ForeignKey("pair.id", ondelete="CASCADE"))
+    engine_version: Mapped[str] = mapped_column(String(32), default="")
+    config_json: Mapped[str | None] = mapped_column(Text, default=None)
+    tolerance_json: Mapped[str | None] = mapped_column(Text, default=None)
+    mask_set_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    stream_stats_json: Mapped[str | None] = mapped_column(Text, default=None)
+    warnings_json: Mapped[str | None] = mapped_column(Text, default=None)
+    timings_json: Mapped[str | None] = mapped_column(Text, default=None)
+    revision_rows_json: Mapped[str | None] = mapped_column(Text, default=None)
+    skipped: Mapped[bool] = mapped_column(default=False)
+    skip_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    timed_out: Mapped[bool] = mapped_column(default=False)
+    duration_s: Mapped[float] = mapped_column(default=0.0)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class FilteredChange(Base):
+    """Everything a noise filter removed, and why.
+
+    Never discard silently. A report that shows twelve changes and can say
+    what it hid is trustworthy; one that simply shows twelve is not.
+    """
+
+    __tablename__ = "filtered_change"
+    __table_args__ = (Index("ix_filtered_change_pair", "pair_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pair_id: Mapped[int] = mapped_column(ForeignKey("pair.id", ondelete="CASCADE"))
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("comparison_run.id", ondelete="CASCADE"), default=None
+    )
+    x: Mapped[float] = mapped_column(default=0.0)
+    y: Mapped[float] = mapped_column(default=0.0)
+    w: Mapped[float] = mapped_column(default=0.0)
+    h: Mapped[float] = mapped_column(default=0.0)
+    kind: Mapped[str | None] = mapped_column(String(32), default=None)
+    streams: Mapped[str | None] = mapped_column(String(64), default=None)
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Which filter removed it, e.g. "filter_speckle".
+    filter_name: Mapped[str] = mapped_column(String(48), default="")
+    #: One sentence a user can read.
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class BoqLink(Base):

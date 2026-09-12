@@ -47,12 +47,8 @@ def _seed_session(tmp_path) -> None:
             [SheetSpec(drawing_no=mapping[number], title=number, body=body)],
         )
 
-    session.old.sheets = [
-        _sheet(path) for path in sorted((tmp_path / "old").glob("*.pdf"))
-    ]
-    session.new.sheets = [
-        _sheet(path) for path in sorted((tmp_path / "new").glob("*.pdf"))
-    ]
+    session.old.sheets = [_sheet(path) for path in sorted((tmp_path / "old").glob("*.pdf"))]
+    session.new.sheets = [_sheet(path) for path in sorted((tmp_path / "new").glob("*.pdf"))]
 
 
 def test_matching_round_trip(client, tmp_path):

@@ -165,9 +165,7 @@ def build_rename_plan(body: RenamePlanRequest) -> dict[str, Any]:
         raise ValidationError(str(exc)) from exc
 
     result = _plan_as_dict(plan)
-    result["preview"] = preview(
-        body.template, list(session.new.sheets), session.rename_context()
-    )
+    result["preview"] = preview(body.template, list(session.new.sheets), session.rename_context())
     return result
 
 

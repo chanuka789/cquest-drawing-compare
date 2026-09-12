@@ -27,7 +27,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from engine.api import (
     routes_align,
+    routes_changes,
     routes_ingest,
+    routes_masks,
     routes_naming,
     routes_register,
     routes_report,
@@ -196,6 +198,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_report.router)
     app.include_router(routes_naming.router)
     app.include_router(routes_align.router)
+    app.include_router(routes_changes.router)
+    app.include_router(routes_masks.router)
     app.include_router(routes_tiles.router)
     app.include_router(ws_progress.router)
 

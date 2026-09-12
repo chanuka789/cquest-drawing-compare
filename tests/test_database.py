@@ -151,8 +151,8 @@ def test_open_existing_database_succeeds(tmp_path):
 
 
 def test_an_older_schema_is_migrated_on_open(monkeypatch, tmp_path):
-    """A schema-1 file (from a build before Phase 3) opens cleanly after the
-    rename_log table is rebuilt at schema 2."""
+    """A schema-1 file (from a build before Phase 3) opens cleanly, running
+    every migration in turn: rename_log rebuilt at 2, comparison storage at 3."""
     import engine.storage.db as db_module
 
     db_path = tmp_path / "legacy.cqdc"
@@ -174,14 +174,26 @@ def test_an_older_schema_is_migrated_on_open(monkeypatch, tmp_path):
             )
         )
     old_engine.dispose()
-    monkeypatch.undo()  # restore SCHEMA_VERSION=2 before opening/migrating
+    monkeypatch.undo()  # restore the current SCHEMA_VERSION before migrating
 
     engine = open_project_db(db_path)
-    assert read_schema_version(engine) == 2
+    assert read_schema_version(engine) == SCHEMA_VERSION
     with session_scope(engine) as session:
         columns = {
             row[1] for row in session.execute(db_module.text("PRAGMA table_info(rename_log)"))
         }
+        change_columns = {
+            row[1] for row in session.execute(db_module.text("PRAGMA table_info(change)"))
+        }
+        tables = {
+            row[0]
+            for row in session.execute(
+                db_module.text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
     assert "source_path" in columns
     assert "source_hash" in columns
+    # Schema 3: the Phase 5 comparison storage.
+    assert {"kind", "streams", "confidence", "detail_json"} <= change_columns
+    assert {"change_hatch", "comparison_run", "filtered_change"} <= tables
     engine.dispose()

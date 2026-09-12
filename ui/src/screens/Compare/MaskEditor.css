@@ -1,0 +1,424 @@
+/* Screen 6 — the mask editor. Every colour comes from tokens.css.
+
+   The sheet is the brightest thing on screen, as everywhere else in the
+   application. Zone overlays use the status palette, never brand red and
+   never the diff palette: red inside a drawing already means "removed", and
+   a zone is not a change. Brand red stays where it belongs — the primary
+   action, the focus ring, the selected row. */
+
+.mask {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  gap: var(--space-4);
+}
+
+/* ── Heading ─────────────────────────────────────────────────────────── */
+
+.mask__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mask__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.mask__back {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-medium);
+}
+
+.mask__back:hover {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.mask__title {
+  margin: 0;
+  font-size: var(--text-screen-title);
+  font-weight: var(--weight-semibold);
+  color: var(--text-hi);
+}
+
+.mask__lede {
+  margin: 0;
+  max-width: 72ch;
+  color: var(--text-mid);
+  font-size: var(--text-body);
+}
+
+.mask__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-body);
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+
+.mask__body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: var(--space-5);
+  min-height: 0;
+}
+
+.mask__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.mask__side-title {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-micro);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-low);
+}
+
+.mask__templates,
+.mask__zones,
+.mask__protected {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mask__template {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+  color: var(--text-mid);
+  font-size: var(--text-body);
+  text-align: left;
+}
+
+.mask__template--on {
+  border-color: var(--brand);
+  background: var(--room-500);
+  color: var(--text-hi);
+}
+
+.mask__template-name {
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.mask__template-state {
+  font-size: var(--text-micro);
+  color: var(--text-low);
+}
+
+/* ── Zone rows ───────────────────────────────────────────────────────── */
+
+.mask__zone-row,
+.mask__kept-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--room-700);
+}
+
+.mask__zone-row--on {
+  border-color: var(--brand);
+}
+
+.mask__kept-row {
+  border-left-color: var(--ok);
+}
+
+.mask__zone-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-hi);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  text-align: left;
+}
+
+.mask__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--info);
+  flex: 0 0 auto;
+}
+
+.mask__swatch--titleblock,
+.mask__swatch--revision_table {
+  background: var(--info);
+}
+
+.mask__swatch--watermark,
+.mask__swatch--stamp,
+.mask__swatch--annotation {
+  background: var(--warn);
+}
+
+.mask__swatch--frame {
+  background: var(--text-low);
+}
+
+.mask__swatch--user {
+  background: var(--brand-soft);
+}
+
+.mask__evidence {
+  margin: 0;
+  color: var(--text-low);
+  font-size: var(--text-micro);
+  line-height: 1.4;
+}
+
+.mask__zone-buttons,
+.mask__kept-row button {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mask__zone-buttons button,
+.mask__kept-row button {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+  align-self: flex-start;
+}
+
+.mask__zone-buttons button:hover,
+.mask__kept-row button:hover {
+  border-color: var(--brand);
+  color: var(--text-hi);
+}
+
+.mask__proposed,
+.mask__ink {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-micro);
+  font-weight: var(--weight-regular);
+}
+
+.mask__proposed {
+  background: var(--room-500);
+  color: var(--warn);
+}
+
+.mask__ink {
+  background: var(--room-500);
+  color: var(--info);
+}
+
+.mask__empty {
+  color: var(--text-low);
+  font-size: var(--text-micro);
+  line-height: 1.5;
+}
+
+.mask__kept-label {
+  color: var(--ok);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Canvas ──────────────────────────────────────────────────────────── */
+
+.mask__canvas-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.mask__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mask__tool {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+}
+
+.mask__tool--on {
+  border-color: var(--brand);
+  background: var(--brand-dim);
+  color: var(--text-hi);
+}
+
+.mask__preview-toggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-mid);
+  font-size: var(--text-micro);
+}
+
+.mask__canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--room-300);
+  border-radius: var(--radius-md);
+  background: var(--sheet);
+  overflow: hidden;
+}
+
+.mask__canvas[data-drawing='yes'] {
+  cursor: crosshair;
+}
+
+.mask__sheet {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* The live preview: everything masked is greyed out, so the user sees
+   exactly what is being compared and nothing has to be imagined. */
+.mask__canvas--preview .mask__zone {
+  background: rgba(20, 24, 28, 0.82);
+}
+
+.mask__zone,
+.mask__kept,
+.mask__draft {
+  position: absolute;
+  border-radius: 2px;
+  pointer-events: auto;
+}
+
+.mask__zone {
+  border: 1px solid var(--info);
+  background: rgba(46, 155, 214, 0.16);
+}
+
+.mask__zone--watermark,
+.mask__zone--stamp,
+.mask__zone--annotation {
+  border-color: var(--warn);
+  background: rgba(227, 154, 0, 0.14);
+}
+
+.mask__zone--frame {
+  border-color: var(--text-low);
+  background: rgba(102, 114, 126, 0.18);
+}
+
+.mask__zone--user {
+  border-color: var(--brand-soft);
+  background: rgba(255, 51, 85, 0.12);
+}
+
+/* A pale watermark excludes only its own ink, so its box is drawn as an
+   outline: the drawing underneath it is still compared. */
+.mask__zone--ink {
+  background: transparent;
+  border-style: dotted;
+}
+
+/* Below the confidence threshold a zone is proposed, never applied on its
+   own authority. Dashes say so without a word. */
+.mask__zone--proposed {
+  border-style: dashed;
+}
+
+.mask__zone--selected {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.mask__kept {
+  border: 1px dashed var(--ok);
+  background: rgba(43, 182, 115, 0.1);
+}
+
+.mask__draft {
+  border: 1px dashed var(--brand);
+  background: var(--brand-dim);
+}
+
+.mask__zone-tag {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  color: var(--text-on-sheet);
+  background: rgba(247, 246, 243, 0.85);
+  padding: 0 3px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────── */
+
+.mask__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.mask__applied {
+  color: var(--ok);
+  font-size: var(--text-micro);
+}
+
+.mask__apply {
+  padding: var(--space-2) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--brand);
+  color: var(--text-on-brand);
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+
+.mask__apply:hover:not(:disabled) {
+  background: var(--brand-soft);
+}
+
+.mask__apply:disabled {
+  opacity: 0.5;
+}
