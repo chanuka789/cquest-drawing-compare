@@ -25,6 +25,13 @@ tests/fixtures/**/*.pdf
 tests/fixtures/**/*.dwg
 tests/fixtures/**/*.dxf
 
+# Graphify's generated knowledge graph. The skill configuration in
+# .claude/, .codex/ and .agents/ IS committed — the graph it builds is not:
+# it is regenerated from the code by `graphify update .`, and graph.json
+# and graph.html are large. Graphify ships a git merge driver for graph.json
+# if this project ever decides to track it instead.
+graphify-out/
+
 # Windows
 Thumbs.db
 desktop.ini
